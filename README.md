@@ -4,7 +4,7 @@
 # How to set the environment
 1. Create conda virtual environment
 ```
-conda create -n name_env
+conda create -n name_env python=3.12.9
 ```
 2. Activate conda virtual environment
 ```
