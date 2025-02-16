@@ -480,7 +480,7 @@ class LlamaCrossDecoderLayer(nn.Module):
 
         outputs = (hidden_states,)
         if output_attentions:
-            outputs += (self_attn_weights,)
+            outputs += (cross_attn_weights,)
 
         return outputs
 
