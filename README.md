@@ -1,10 +1,18 @@
-# Research Documentation
+## Research Documentation
 [Notion Page](https://crystal-air-942.notion.site/CrossDecoder-Training-Additional-Cross-Attention-Layer-in-Decoder-Only-Models-19941c6bef1680208d9af3e4f577aa8d?pvs=4)
 
-# How to set the environment
+## How to set the environment by conda_requirements.txt
+1. download conda_requirements.txt
+  
+2. Run the following code (Anaconda3 must be already installed)
+```
+conda env create -f conda_requirements.txt
+```
+
+## How to set the environment from scratch
 1. Create conda virtual environment
 ```
-conda create -n name_env python=3.12.9
+conda create -n cross_decoder_env python=3.12.9
 ```
 2. Activate conda virtual environment
 ```
