@@ -1,4 +1,4 @@
-# Current Branch is feature/llam!
+# Current Branch is feature/llama!
 To return to the main branch, [click here](https://github.com/JakeFRCSE/CrossDecoder)!
 
 # Contributions of Current Branch (feature/llama)
