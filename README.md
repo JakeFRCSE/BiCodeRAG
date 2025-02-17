@@ -1,5 +1,10 @@
+## Currently Working on LLaMA
+Please switch to the [feature/llama](https://github.com/JakeFRCSE/CrossDecoder/tree/feature/llama) branch to view the latest progress.
+
 ## Research Documentation
-[Notion Page](https://crystal-air-942.notion.site/CrossDecoder-Training-Additional-Cross-Attention-Layer-in-Decoder-Only-Models-19941c6bef1680208d9af3e4f577aa8d?pvs=4)
+Please click the link to access the Notion page, which is used for organizing ideas.
+
+[Click Here!](https://crystal-air-942.notion.site/CrossDecoder-Training-Additional-Cross-Attention-Layer-in-Decoder-Only-Models-19941c6bef1680208d9af3e4f577aa8d?pvs=4)
 
 ## How to set the environment by conda_requirements.txt
 1. download conda_requirements.txt
