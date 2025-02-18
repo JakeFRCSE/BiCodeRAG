@@ -335,7 +335,7 @@ class LlamaCrossAttention(nn.Module):
         hidden_states: torch.Tensor,
         cross_attention_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor],
-        past_key_value: Optional[Cache] = None,
+        past_cross_key_value: Optional[Cache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
@@ -345,8 +345,18 @@ class LlamaCrossAttention(nn.Module):
         cross_hidden_shape = (*cross_input_shape, -1, self.head_dim)
 
         query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-        key_states = self.k_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
-        value_states = self.v_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
+        num_cross_layers = int(self.config.num_hidden_layers / 4)
+
+        if past_cross_key_value is not None and len(past_cross_key_value) == num_cross_layers:
+            key_states, value_states = past_cross_key_value[self.layer_idx]
+        else:
+            key_states = self.k_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
+            value_states = self.v_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
+            if past_cross_key_value is not None and len(past_cross_key_value) < num_cross_layers:
+                key_states, value_states = past_cross_key_value.update(key_states, value_states, self.layer_idx)
+            
+        if key_states is None and value_states is None:
+            raise ValueError("key_states and value_states must be provided")
 
         attention_interface: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
@@ -445,7 +455,7 @@ class LlamaCrossDecoderLayer(nn.Module):
         cross_attention_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        past_key_value: Optional[Cache] = None,
+        past_cross_key_value: Optional[Cache] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
@@ -459,9 +469,10 @@ class LlamaCrossDecoderLayer(nn.Module):
         # Cross Attention
         hidden_states, cross_attn_weights = self.cross_attn(
             hidden_states=hidden_states,
+            cross_attention_states=cross_attention_states,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            past_key_value=past_key_value,
+            past_cross_key_value=past_cross_key_value,
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
@@ -1013,7 +1024,7 @@ class LlamaEncodeModel(LlamaPreTrainedModel):
 )
 class LlamaCrossModel(LlamaPreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`]
+    Transformer cross attention decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`] or ['LlamaCrossDecoderLayer']
 
     Args:
         config: LlamaConfig
@@ -1023,10 +1034,14 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
+        self.num_cross_layers = int(config.num_hidden_layers / 4)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
             [LlamaDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+        )
+        self.cross_layers = nn.ModuleList(
+            [LlamaCrossDecoderLayer(config, layer_idx) for layer_idx in range(self.num_cross_layers)]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
@@ -1045,7 +1060,9 @@ class LlamaCrossModel(LlamaPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
+        cross_attention_states: torch.Tensor = None,
         attention_mask: Optional[torch.Tensor] = None,
+        cross_attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -1077,6 +1094,9 @@ class LlamaCrossModel(LlamaPreTrainedModel):
 
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
+
+        if use_cache and past_cross_key_values is None:
+            past_cross_key_values = DynamicCache()
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -1133,6 +1153,44 @@ class LlamaCrossModel(LlamaPreTrainedModel):
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
+
+            if decoder_layer.layer_idx % 4 == 3:
+                cross_layer_idx = int(decoder_layer.layer_idx / 4)
+                cross_layer = self.cross_layers[cross_layer_idx]
+                if output_hidden_states:
+                    all_hidden_states += (hidden_states,)
+
+                if self.gradient_checkpointing and self.training:
+                    layer_outputs = self._gradient_checkpointing_func(
+                        cross_layer.__call__,
+                        hidden_states,
+                        cross_attention_states,
+                        cross_attention_mask,
+                        position_ids,
+                        past_cross_key_values,
+                        output_attentions,
+                        use_cache,
+                        cache_position,
+                        position_embeddings,
+                    )
+                else:
+                    layer_outputs = cross_layer(
+                        hidden_states=hidden_states,
+                        cross_attention_states=cross_attention_states,
+                        attention_mask=cross_attention_mask,
+                        position_ids=position_ids,
+                        past_cross_key_value=past_cross_key_values,
+                        output_attentions=output_attentions,
+                        use_cache=use_cache,
+                        cache_position=cache_position,
+                        position_embeddings=position_embeddings,
+                        **flash_attn_kwargs,
+                    )
+
+                hidden_states = layer_outputs[0]
+
+                if output_attentions:
+                    all_self_attns += (layer_outputs[1],)
 
         hidden_states = self.norm(hidden_states)
 
