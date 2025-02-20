@@ -228,6 +228,30 @@ def eager_attention_forward(
 
     return attn_output, attn_weights
 
+def cross_attention_forward(
+    module: nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask: Optional[torch.Tensor],
+    scaling: float,
+    dropout: float = 0.0,
+    **kwargs,
+):
+    key_states = repeat_kv(key, module.num_key_value_groups)
+    value_states = repeat_kv(value, module.num_key_value_groups)
+
+    attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
+    if attention_mask is not None:
+        attn_weights = attn_weights + attention_mask[:, :, :query.shape[-2], :key.shape[-2]]
+
+    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
+    attn_weights = nn.functional.dropout(attn_weights, p=dropout, training=module.training)
+    attn_output = torch.matmul(attn_weights, value_states)
+    attn_output = attn_output.transpose(1, 2).contiguous()
+
+    return attn_output, attn_weights
+
 
 class LlamaAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
@@ -345,7 +369,7 @@ class LlamaCrossAttention(nn.Module):
         cross_hidden_shape = (*cross_input_shape, -1, self.head_dim)
 
         query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-        num_cross_layers = int(self.config.num_hidden_layers / 4)
+        num_cross_layers = self.config.num_hidden_layers // 4
 
         if past_cross_key_value is not None and len(past_cross_key_value) == num_cross_layers:
             key_states, value_states = past_cross_key_value[self.layer_idx]
@@ -355,18 +379,10 @@ class LlamaCrossAttention(nn.Module):
             if past_cross_key_value is not None and len(past_cross_key_value) < num_cross_layers:
                 key_states, value_states = past_cross_key_value.update(key_states, value_states, self.layer_idx)
             
-        if key_states is None and value_states is None:
+        if key_states is None or value_states is None:
             raise ValueError("key_states and value_states must be provided")
 
-        attention_interface: Callable = eager_attention_forward
-        if self.config._attn_implementation != "eager":
-            if self.config._attn_implementation == "sdpa" and kwargs.get("output_attentions", False):
-                logger.warning_once(
-                    "`torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to "
-                    'eager attention. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
-                )
-            else:
-                attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
+        attention_interface: Callable = cross_attention_forward
 
         attn_output, attn_weights = attention_interface(
             self,
@@ -453,7 +469,7 @@ class LlamaCrossDecoderLayer(nn.Module):
         self,
         hidden_states: torch.Tensor,
         cross_attention_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor],
         position_ids: Optional[torch.LongTensor] = None,
         past_cross_key_value: Optional[Cache] = None,
         output_attentions: Optional[bool] = False,
@@ -1037,9 +1053,7 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         self.num_cross_layers = int(config.num_hidden_layers / 4)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        self.layers = nn.ModuleList(
-            [LlamaDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
-        )
+        self.layers = None
         self.cross_layers = nn.ModuleList(
             [LlamaCrossDecoderLayer(config, layer_idx) for layer_idx in range(self.num_cross_layers)]
         )
@@ -1049,6 +1063,12 @@ class LlamaCrossModel(LlamaPreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+        model.layers = model.get_submodule("layers")
+        return model
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -1065,6 +1085,7 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         cross_attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
+        past_cross_key_valyes: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
@@ -1155,7 +1176,7 @@ class LlamaCrossModel(LlamaPreTrainedModel):
                 all_self_attns += (layer_outputs[1],)
 
             if decoder_layer.layer_idx % 4 == 3:
-                cross_layer_idx = int(decoder_layer.layer_idx / 4)
+                cross_layer_idx = decoder_layer.layer_idx // 4
                 cross_layer = self.cross_layers[cross_layer_idx]
                 if output_hidden_states:
                     all_hidden_states += (hidden_states,)
