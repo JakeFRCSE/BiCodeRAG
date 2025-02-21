@@ -262,10 +262,8 @@ class LlamaAttention(nn.Module):
         attention_mask: Optional[torch.Tensor],
         past_key_value: Optional[Cache] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        is_causal: Optional[bool] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        self.is_causal = is_causal
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
 
@@ -299,7 +297,6 @@ class LlamaAttention(nn.Module):
             attention_mask,
             dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
-            is_causal=self.is_causal if self.config._attn_implementation == "sdpa" else None,
             **kwargs,
         )
 
@@ -318,7 +315,6 @@ class LlamaCrossAttention(nn.Module):
         self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
         self.scaling = self.head_dim**-0.5
         self.attention_dropout = config.attention_dropout
-        self.is_causal = False
 
         self.q_proj = nn.Linear(
             config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
@@ -340,10 +336,8 @@ class LlamaCrossAttention(nn.Module):
         attention_mask: Optional[torch.Tensor],
         past_cross_key_value: Optional[Cache] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        is_causal: Optional[bool] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        self.is_causal = is_causal
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
         cross_input_shape = cross_attention_states.shape[:-1]
@@ -381,7 +375,6 @@ class LlamaCrossAttention(nn.Module):
             attention_mask,
             dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
-            is_causal=self.is_causal if self.config._attn_implementation == "sdpa" else None,
             **kwargs,
         )
 
@@ -411,7 +404,6 @@ class LlamaDecoderLayer(nn.Module):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
-        is_causal: Optional[bool] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         residual = hidden_states
@@ -428,7 +420,6 @@ class LlamaDecoderLayer(nn.Module):
             use_cache=use_cache,
             cache_position=cache_position,
             position_embeddings=position_embeddings,
-            is_causal=is_causal,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -468,7 +459,6 @@ class LlamaCrossDecoderLayer(nn.Module):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
-        is_causal: Optional[bool] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         residual = hidden_states
@@ -486,7 +476,6 @@ class LlamaCrossDecoderLayer(nn.Module):
             use_cache=use_cache,
             cache_position=cache_position,
             position_embeddings=position_embeddings,
-            is_causal=is_causal,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -673,7 +662,6 @@ class LlamaModel(LlamaPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        is_causal: Optional[bool] = None,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -706,11 +694,10 @@ class LlamaModel(LlamaPreTrainedModel):
 
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
-        causal_mask = None
-        if is_causal is True:
-            causal_mask = self._update_causal_mask(
-                attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-            )
+
+        causal_mask = self._update_causal_mask(
+            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+        )
         hidden_states = inputs_embeds
 
         # create position embeddings to be shared across the decoder layers
@@ -735,7 +722,6 @@ class LlamaModel(LlamaPreTrainedModel):
                     use_cache,
                     cache_position,
                     position_embeddings,
-                    is_causal,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -747,7 +733,6 @@ class LlamaModel(LlamaPreTrainedModel):
                     use_cache=use_cache,
                     cache_position=cache_position,
                     position_embeddings=position_embeddings,
-                    is_causal=is_causal,
                     **flash_attn_kwargs,
                 )
 
@@ -940,7 +925,6 @@ class LlamaEncodeModel(LlamaPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        is_causal: Optional[bool] = False,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -997,7 +981,6 @@ class LlamaEncodeModel(LlamaPreTrainedModel):
                     use_cache,
                     cache_position,
                     position_embeddings,
-                    is_causal,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -1009,7 +992,6 @@ class LlamaEncodeModel(LlamaPreTrainedModel):
                     use_cache=use_cache,
                     cache_position=cache_position,
                     position_embeddings=position_embeddings,
-                    is_causal=is_causal,
                     **flash_attn_kwargs,
                 )
 
@@ -1096,7 +1078,6 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        is_causal: Optional[bool] = True,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1161,7 +1142,6 @@ class LlamaCrossModel(LlamaPreTrainedModel):
                     use_cache,
                     cache_position,
                     position_embeddings,
-                    is_causal,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -1173,7 +1153,6 @@ class LlamaCrossModel(LlamaPreTrainedModel):
                     use_cache=use_cache,
                     cache_position=cache_position,
                     position_embeddings=position_embeddings,
-                    is_causal=is_causal,
                     **flash_attn_kwargs,
                 )
 
