@@ -299,7 +299,7 @@ class LlamaAttention(nn.Module):
             attention_mask,
             dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
-            is_causal=self.is_causal if self.config._attn_implementation == "sdpa" else None
+            is_causal=self.is_causal if self.config._attn_implementation == "sdpa" else None,
             **kwargs,
         )
 
@@ -381,7 +381,7 @@ class LlamaCrossAttention(nn.Module):
             attention_mask,
             dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
-            is_causal=self.is_causal if self.config._attn_implementation == "sdpa" else None
+            is_causal=self.is_causal if self.config._attn_implementation == "sdpa" else None,
             **kwargs,
         )
 
@@ -706,11 +706,11 @@ class LlamaModel(LlamaPreTrainedModel):
 
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
-
-        causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-        )
-
+        causal_mask = None
+        if is_causal is True:
+            causal_mask = self._update_causal_mask(
+                attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+            )
         hidden_states = inputs_embeds
 
         # create position embeddings to be shared across the decoder layers
@@ -973,7 +973,6 @@ class LlamaEncodeModel(LlamaPreTrainedModel):
 
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
-
         hidden_states = inputs_embeds
 
         # create position embeddings to be shared across the decoder layers
@@ -1050,10 +1049,12 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
-        self.num_cross_layers = int(config.num_hidden_layers / 4)
+        self.num_cross_layers = config.num_hidden_layers // 4
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        self.layers = None
+        self.layers = nn.ModuleList(
+            [LlamaDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+        )
         self.cross_layers = nn.ModuleList(
             [LlamaCrossDecoderLayer(config, layer_idx) for layer_idx in range(self.num_cross_layers)]
         )
@@ -1067,7 +1068,10 @@ class LlamaCrossModel(LlamaPreTrainedModel):
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
         model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
-        model.layers = model.get_submodule("layers")
+        model.cross_layers = nn.ModuleList(
+            [LlamaCrossDecoderLayer(model.config, layer_idx) for layer_idx in range(model.config.num_hidden_layers // 4)]
+        )
+        model.post_init()
         return model
 
     def get_input_embeddings(self):
@@ -1085,7 +1089,7 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         cross_attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
-        past_cross_key_valyes: Optional[Cache] = None,
+        past_cross_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
@@ -1178,8 +1182,8 @@ class LlamaCrossModel(LlamaPreTrainedModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
 
-            if decoder_layer.layer_idx % 4 == 3:
-                cross_layer_idx = decoder_layer.layer_idx // 4
+            if decoder_layer.self_attn.layer_idx % 4 == 3:
+                cross_layer_idx = decoder_layer.self_attn.layer_idx // 4
                 cross_layer = self.cross_layers[cross_layer_idx]
                 if output_hidden_states:
                     all_hidden_states += (hidden_states,)
