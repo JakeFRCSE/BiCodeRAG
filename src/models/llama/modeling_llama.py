@@ -36,7 +36,7 @@ from transformers.modeling_outputs import (
     TokenClassifierOutput,
 )
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
-from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel, load_state_dict
 from transformers.processing_utils import Unpack
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.utils import (
@@ -1013,8 +1013,7 @@ class LlamaEncodeModel(LlamaPreTrainedModel):
             attentions=all_self_attns,
         )
         return output if return_dict else output.to_tuple()
-    
-
+  
 @add_start_docstrings(
     "The bare LLaMA Model outputting raw hidden-states without any specific head on top.",
     LLAMA_START_DOCSTRING,
@@ -1484,6 +1483,18 @@ class LlamaCrossDecoderLM(LlamaPreTrainedModel, GenerationMixin):
 
         # Initialize weights and apply final processing
         self.post_init()
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        config = kwargs.pop("config", None)
+        if config is None:
+            config = LlamaConfig.from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+
+        model = cls(config)
+        model.encode_model = LlamaEncodeModel.from_pretrained(pretrained_model_name_or_path)
+        model.decode_model = LlamaCrossModel.from_pretrained(pretrained_model_name_or_path)
+
+        return model
 
     def encode(self, input_ids, attention_mask=None, position_ids=None, past_key_values=None, inputs_embeds=None, use_cache=None, output_attentions=None, output_hidden_states=None, return_dict=None, cache_position=None, **kwargs):
         encoder_output = self.encode_model(
