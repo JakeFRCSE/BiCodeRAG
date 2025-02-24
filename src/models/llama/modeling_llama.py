@@ -343,6 +343,7 @@ class LlamaCrossAttention(nn.Module):
         cross_input_shape = cross_attention_states.shape[:-1]
         cross_hidden_shape = (*cross_input_shape, -1, self.head_dim)
 
+        #Todo: caching
         query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         num_cross_layers = self.config.num_hidden_layers // 4
         key_states = self.k_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
@@ -888,7 +889,7 @@ class LlamaEncodeModel(LlamaPreTrainedModel):
 
     def __init__(self, config: LlamaConfig):
         super().__init__(config)
-        self.padding_idx = config.pad_token_id if config.pad_token_id is not None else 128002
+        self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
@@ -909,7 +910,7 @@ class LlamaEncodeModel(LlamaPreTrainedModel):
         self.embed_tokens = value
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
-    def forward (
+    def forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
