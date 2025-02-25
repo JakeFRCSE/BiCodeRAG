@@ -46,7 +46,7 @@ generated_output = llama_cross_decoder_lm.generate(decoder_input_tokenized.input
 result = llama_tokenizer.batch_decode(generated_output)
 ```
 
-# Contributions of Current Branch (feature/llama)
+# Contributions of Current Branch (dev/llama)
 1. LlamaCrossAttention
 2. LlamaCrossDecoderLayer
 3. LlamaEncodeModel
