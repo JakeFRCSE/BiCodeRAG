@@ -5,4 +5,7 @@ To view weekly research progress report (which is in korean), [click here!](http
 
 
 # Contributions of Current Branch (feature/llama-opt-params)
-1. Customized LlamaForCausalLM
+1. LlamaCrossDecoderLayer -> LlamaCrossAttentionLayer
+2. LlamaEncodeModel deleted
+3. LlamaCrossModel -> LlamaBiCodeModel
+4. LlamaCrossDecoderLM -> LlamaBiCodeLM"

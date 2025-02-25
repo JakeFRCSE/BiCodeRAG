@@ -434,7 +434,7 @@ class LlamaDecoderLayer(nn.Module):
         return outputs
 
 
-class LlamaCrossDecoderLayer(nn.Module):
+class LlamaCrossAttentionLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -874,201 +874,14 @@ class LlamaModel(LlamaPreTrainedModel):
                 )
 
         return causal_mask
-    
-@add_start_docstrings(
-    "The bare LLaMA Model outputting raw hidden-states without any specific head on top.",
-    LLAMA_START_DOCSTRING,
-)
-class LlamaEncodeModel(LlamaPreTrainedModel):
-    """
-    Transformer encoder edited from decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`]
-
-    Args:
-        config: LlamaConfig
-    """
-
-    def __init__(self, config: LlamaConfig):
-        super().__init__(config)
-        self.padding_idx = config.pad_token_id
-        self.vocab_size = config.vocab_size
-
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        self.layers = nn.ModuleList(
-            [LlamaDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
-        )
-        self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.rotary_emb = LlamaRotaryEmbedding(config=config)
-        self.gradient_checkpointing = False
-
-        # Initialize weights and apply final processing
-        self.post_init()
-
-    def get_input_embeddings(self):
-        return self.embed_tokens
-
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
-
-    @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
-    def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Cache] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
-    ) -> Union[Tuple, BaseModelOutputWithPast]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        if (input_ids is None) ^ (inputs_embeds is not None):
-            raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
-
-        if self.gradient_checkpointing and self.training and use_cache:
-            logger.warning_once(
-                "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
-            )
-            use_cache = False
-
-        if inputs_embeds is None:
-            inputs_embeds = self.embed_tokens(input_ids)
-
-        if use_cache and past_key_values is None:
-            past_key_values = DynamicCache()
-
-        if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position = torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-            )
-
-        if position_ids is None:
-            position_ids = cache_position.unsqueeze(0)
-
-        padding_mask = self._prepare_4d_self_attention_mask(
-            attention_mask, sequence_length=inputs_embeds.shape[1], dtype=inputs_embeds.dtype, device=inputs_embeds.device, batch_size=inputs_embeds.shape[0])
-
-        hidden_states = inputs_embeds
-
-        # create position embeddings to be shared across the decoder layers
-        position_embeddings = self.rotary_emb(hidden_states, position_ids)
-
-        # decoder layers
-        all_hidden_states = () if output_hidden_states else None
-        all_self_attns = () if output_attentions else None
-
-        for decoder_layer in self.layers[: self.config.num_hidden_layers]:
-            if output_hidden_states:
-                all_hidden_states += (hidden_states,)
-
-            if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    decoder_layer.__call__,
-                    hidden_states,
-                    padding_mask,
-                    position_ids,
-                    past_key_values,
-                    output_attentions,
-                    use_cache,
-                    cache_position,
-                    position_embeddings,
-                )
-            else:
-                layer_outputs = decoder_layer(
-                    hidden_states,
-                    attention_mask=padding_mask,
-                    position_ids=position_ids,
-                    past_key_value=past_key_values,
-                    output_attentions=output_attentions,
-                    use_cache=use_cache,
-                    cache_position=cache_position,
-                    position_embeddings=position_embeddings,
-                    **flash_attn_kwargs,
-                )
-
-            hidden_states = layer_outputs[0]
-
-            if output_attentions:
-                all_self_attns += (layer_outputs[1],)
-
-        hidden_states = self.norm(hidden_states)
-
-        # add hidden states from the last decoder layer
-        if output_hidden_states:
-            all_hidden_states += (hidden_states,)
-
-        output = BaseModelOutputWithPast(
-            last_hidden_state=hidden_states,
-            past_key_values=past_key_values if use_cache else None,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attns,
-        )
-        return output if return_dict else output.to_tuple()
-
-    @staticmethod
-    def _prepare_4d_self_attention_mask(
-        attention_mask: torch.Tensor,
-        sequence_length: int,
-        dtype: torch.dtype,
-        device: torch.device,
-        batch_size: int,
-        **kwargs,
-    ):
-        """
-        Creates a causal 4D mask of shape `(batch_size, 1, query_length, key_value_length)` from a 2D mask of shape
-        `(batch_size, key_value_length)`, or if the input `attention_mask` is already 4D, do nothing.
-
-        Args:
-            attention_mask (`torch.Tensor`):
-                A 2D attention mask of shape `(batch_size, key_value_length)` or a 4D attention mask of shape
-                `(batch_size, 1, key_value_length, key_value_length)`.
-            sequence_length (`int`):
-                The sequence length being processed.
-                The target length: when generating with static cache, the mask should be as long as the static cache,
-                to account for the 0 padding, the part of the cache that is not filled yet.
-            dtype (`torch.dtype`):
-                The dtype to use for the 4D attention mask.
-            device (`torch.device`):
-                The device to plcae the 4D attention mask on.
-            batch_size (`torch.Tensor`):
-                Batch size.
-        """
-        if attention_mask is not None and attention_mask.dim() == 4:
-            # In this case we assume that the mask comes already in inverted form and requires no inversion or slicing.
-            padding_mask = attention_mask
-        else:
-            min_dtype = torch.finfo(dtype).min
-            padding_mask = torch.zeros(
-            (sequence_length, sequence_length), dtype=dtype, device=device
-            )
-            padding_mask = padding_mask[None, None, :, :].expand(batch_size, 1, -1, -1)
-            if attention_mask is not None:
-                padding_mask = padding_mask.clone()  # copy to contiguous memory for in-place edit
-                mask_length = attention_mask.shape[-1]
-                key_padding = attention_mask[:, None, None, :mask_length] == 0
-                padding_mask = padding_mask.masked_fill(key_padding, min_dtype)
-                query_padding = attention_mask[:, None, :mask_length, None] == 0
-                padding_mask = padding_mask.masked_fill(query_padding, min_dtype)
-
-        return padding_mask
   
 @add_start_docstrings(
     "The bare LLaMA Model outputting raw hidden-states without any specific head on top.",
     LLAMA_START_DOCSTRING,
 )
-class LlamaCrossModel(LlamaPreTrainedModel):
+class LlamaBiCodeModel(LlamaPreTrainedModel):
     """
-    Transformer cross attention decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`] or ['LlamaCrossDecoderLayer']
+    Transformer cross attention decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`] or ['LlamaCrossAttentionLayer']
 
     Args:
         config: LlamaConfig
@@ -1085,7 +898,7 @@ class LlamaCrossModel(LlamaPreTrainedModel):
             [LlamaDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
         self.cross_layers = nn.ModuleList(
-            [LlamaCrossDecoderLayer(config, layer_idx) for layer_idx in range(self.num_cross_layers)]
+            [LlamaCrossAttentionLayer(config, layer_idx) for layer_idx in range(self.num_cross_layers)]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
@@ -1093,15 +906,6 @@ class LlamaCrossModel(LlamaPreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
-        model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
-        model.cross_layers = nn.ModuleList(
-            [LlamaCrossDecoderLayer(model.config, layer_idx) for layer_idx in range(model.config.num_hidden_layers // 4)]
-        )
-        model.post_init()
-        return model
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -1125,6 +929,8 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        *,
+        is_encoding: Optional[bool] = None,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1161,9 +967,16 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-        )
+        if is_encoding == True:
+            sequence_mask = self._prepare_4d_self_attention_mask(
+                attention_mask, sequence_length=inputs_embeds.shape[1], 
+                dtype=inputs_embeds.dtype, device=inputs_embeds.device, 
+                batch_size=inputs_embeds.shape[0],
+            )
+        else:
+            sequence_mask = self._update_causal_mask(
+                attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+            )
 
         hidden_states = inputs_embeds
 
@@ -1182,7 +995,7 @@ class LlamaCrossModel(LlamaPreTrainedModel):
                 layer_outputs = self._gradient_checkpointing_func(
                     decoder_layer.__call__,
                     hidden_states,
-                    causal_mask,
+                    sequence_mask,
                     position_ids,
                     past_key_values,
                     output_attentions,
@@ -1193,7 +1006,7 @@ class LlamaCrossModel(LlamaPreTrainedModel):
             else:
                 layer_outputs = decoder_layer(
                     hidden_states,
-                    attention_mask=causal_mask,
+                    attention_mask=sequence_mask,
                     position_ids=position_ids,
                     past_key_value=past_key_values,
                     output_attentions=output_attentions,
@@ -1208,7 +1021,7 @@ class LlamaCrossModel(LlamaPreTrainedModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
 
-            if decoder_layer.self_attn.layer_idx % 4 == 3:
+            if decoder_layer.self_attn.layer_idx % 4 == 3 and is_encoding is not True:
                 cross_layer_idx = decoder_layer.self_attn.layer_idx // 4
                 cross_layer = self.cross_layers[cross_layer_idx]
                 cross_attention_mask = self._prepare_4d_cross_attention_mask(
@@ -1402,18 +1215,17 @@ class LlamaCrossModel(LlamaPreTrainedModel):
         **kwargs,
     ) -> torch.Tensor:
         """
-        Creates a 4D mask of shape `(batch_size, 1, query_length, key_value_length)` from a 2D mask of shape
-        `(batch_size, key_value_length)`, or if the input `attention_mask` is already 4D, do nothing.
+        Creates a 4D mask of shape `(batch_size, 1, sequence_length, target_length)` from a 2D mask of shape
+        `(batch_size, target_length)`, or if the input `attention_mask` is already 4D, do nothing.
 
         Args:
             attention_mask (`torch.Tensor`):
-                A 2D attention mask of shape `(batch_size, key_value_length)` or a 4D attention mask of shape
-                `(batch_size, 1, query_length, key_value_length)`.
+                A 2D attention mask of shape `(batch_size, target_length)` or a 4D attention mask of shape
+                `(batch_size, 1, sequence_length, target_length)`.
             sequence_length (`int`):
-                The sequence length being processed.
+                The sequence length of the input tensor.
             target_length (`int`):
-                The target length: when generating with static cache, the mask should be as long as the static cache,
-                to account for the 0 padding, the part of the cache that is not filled yet.
+                The sequence length of the target tensor.(Cross hidden states)
             dtype (`torch.dtype`):
                 The dtype to use for the 4D attention mask.
             device (`torch.device`):
@@ -1434,6 +1246,51 @@ class LlamaCrossModel(LlamaPreTrainedModel):
                 mask_length = attention_mask.shape[-1]
                 key_padding = attention_mask[:, None, None, :mask_length] == 0
                 padding_mask = padding_mask.masked_fill(key_padding, min_dtype)
+        return padding_mask
+
+    @staticmethod
+    def _prepare_4d_self_attention_mask(
+        attention_mask: torch.Tensor,
+        sequence_length: int,
+        dtype: torch.dtype,
+        device: torch.device,
+        batch_size: int,
+        **kwargs,
+    ):
+        """
+        Creates a causal 4D mask of shape `(batch_size, 1, sequence_length, sequence_length)` from a 2D mask of shape
+        `(batch_size, sequence_length)`, or if the input `attention_mask` is already 4D, do nothing.
+
+        Args:
+            attention_mask (`torch.Tensor`):
+                A 2D attention mask of shape `(batch_size, sequence_length)` or a 4D attention mask of shape
+                `(batch_size, 1, sequence_length, sequence_length)`.
+            sequence_length (`int`):
+                The sequence length being processed.
+            dtype (`torch.dtype`):
+                The dtype to use for the 4D attention mask.
+            device (`torch.device`):
+                The device to plcae the 4D attention mask on.
+            batch_size (`torch.Tensor`):
+                Batch size.
+        """
+        if attention_mask is not None and attention_mask.dim() == 4:
+            # In this case we assume that the mask comes already in inverted form and requires no inversion or slicing.
+            padding_mask = attention_mask
+        else:
+            min_dtype = torch.finfo(dtype).min
+            padding_mask = torch.zeros(
+            (sequence_length, sequence_length), dtype=dtype, device=device
+            )
+            padding_mask = padding_mask[None, None, :, :].expand(batch_size, 1, -1, -1)
+            if attention_mask is not None:
+                padding_mask = padding_mask.clone()  # copy to contiguous memory for in-place edit
+                mask_length = attention_mask.shape[-1]
+                key_padding = attention_mask[:, None, None, :mask_length] == 0
+                padding_mask = padding_mask.masked_fill(key_padding, min_dtype)
+                query_padding = attention_mask[:, None, :mask_length, None] == 0
+                padding_mask = padding_mask.masked_fill(query_padding, min_dtype)
+
         return padding_mask
 
 
@@ -1565,70 +1422,25 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
             attentions=outputs.attentions,
         )
 
-class KwargsForCrossDecoderLM(FlashAttentionKwargs, LossKwargs): ...
+class KwargsForBiCodeLM(FlashAttentionKwargs, LossKwargs): ...
 
 
-class LlamaCrossDecoderLM(LlamaPreTrainedModel, GenerationMixin):
+class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
 
     def __init__(self, config):
         super().__init__(config)
-        self.encode_model = LlamaEncodeModel(config)
-        self.decode_model = LlamaCrossModel(config)
+        self.model = LlamaBiCodeModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.encoder_attention_mask = None
-        self.encoder_hidden_states = None
+        self.cross_attention_mask = None
+        self.cross_hidden_states = None
         self.post_init()
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
-        from transformers.modeling_utils import load_state_dict
-        from huggingface_hub import hf_hub_download
-
-        config = kwargs.pop("config", None)
-        if config is None:
-            config = LlamaConfig.from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
-
-        model = cls(config)
-
-        try:
-            safetensors_path = hf_hub_download(
-                repo_id=pretrained_model_name_or_path,
-                filename="model.safetensors",
-            )
-            state_dict = load_state_dict(safetensors_path)
-        except Exception as e:
-            try:
-                bin_path = hf_hub_download(
-                    repo_id=pretrained_model_name_or_path,
-                    filename="pytorch_model.bin",
-                )
-                state_dict = load_state_dict(bin_path)
-            except Exception as e:
-                raise ValueError(f"Failed to load state_dict from {pretrained_model_name_or_path}: {e}")
-
-        lm_head_key = "lm_head.weight"
-        if lm_head_key in state_dict:
-            lm_head_weight = state_dict[lm_head_key]
-            if lm_head_weight.shape == model.lm_head.weight.shape:
-                model.lm_head.weight.data = lm_head_weight
-            else:
-                print(f"Warning: lm_head weight shape mismatch. Expected {model.lm_head.weight.shape}, got {lm_head_weight.shape}")
-        else:
-            print(f"Warning: {lm_head_key} not found in pretrained state_dict. Using initialized weights.")
-
-
-        model.encode_model = LlamaEncodeModel.from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
-        model.decode_model = LlamaCrossModel.from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
-
-        model.post_init()
-        return model
-
     def encode(self, input_ids, attention_mask=None, position_ids=None, past_key_values=None, inputs_embeds=None, use_cache=None, output_attentions=None, output_hidden_states=None, return_dict=None, cache_position=None, **kwargs):
-        encoder_output = self.encode_model(
+        encoder_output = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -1639,27 +1451,28 @@ class LlamaCrossDecoderLM(LlamaPreTrainedModel, GenerationMixin):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             cache_position=cache_position,
+            is_encoding = True,
             **kwargs,
         )
         return encoder_output
     
-    def set_encoder_outputs(self, hidden_states, attention_mask):
-        self.encoder_hidden_states = hidden_states
-        self.encoder_attention_mask = attention_mask
+    def set_cross_inputs(self, hidden_states, attention_mask):
+        self.cross_hidden_states = hidden_states
+        self.cross_attention_mask = attention_mask
 
-    def empty_encoder_outputs(self):
-        self.encoder_hidden_states = None
-        self.encoder_attention_mask = None
+    def empty_cross_outputs(self):
+        self.cross_hidden_states = None
+        self.cross_attention_mask = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
         
 
     def get_input_embeddings(self):
-        return self.decode_model.embed_tokens
+        return self.model.embed_tokens
 
     def set_input_embeddings(self, value):
-        self.decode_model.embed_tokens = value
+        self.model.embed_tokens = value
 
     def get_output_embeddings(self):
         return self.lm_head
@@ -1668,10 +1481,10 @@ class LlamaCrossDecoderLM(LlamaPreTrainedModel, GenerationMixin):
         self.lm_head = new_embeddings
 
     def set_decoder(self, decoder):
-        self.decode_model = decoder
+        self.model = decoder
 
     def get_decoder(self):
-        return self.decode_model
+        return self.model
 
     @deprecate_kwarg("num_logits_to_keep", version="4.50", new_name="logits_to_keep")
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
@@ -1733,7 +1546,7 @@ class LlamaCrossDecoderLM(LlamaPreTrainedModel, GenerationMixin):
         if self.encoder_hidden_states is None:
             raise ValueError("You need to set the encoder hidden states before running the decoder.")
 
-        decoder_outputs = self.decode_model(
+        decoder_outputs = self.model(
             input_ids=input_ids,
             cross_attention_states=self.encoder_hidden_states,
             attention_mask=attention_mask,
