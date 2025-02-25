@@ -334,7 +334,7 @@ class LlamaCrossAttention(nn.Module):
         hidden_states: torch.Tensor,
         cross_attention_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor],
-        past_cross_key_value: Optional[Cache] = None,
+        cross_attention_cache: Optional[Cache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
@@ -342,14 +342,18 @@ class LlamaCrossAttention(nn.Module):
         hidden_shape = (*input_shape, -1, self.head_dim)
         cross_input_shape = cross_attention_states.shape[:-1]
         cross_hidden_shape = (*cross_input_shape, -1, self.head_dim)
-
-        #Todo: caching
-        query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         num_cross_layers = self.config.num_hidden_layers // 4
-        key_states = self.k_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
-        value_states = self.v_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
-        if past_cross_key_value is not None and len(past_cross_key_value) < num_cross_layers:
-            key_states, value_states = past_cross_key_value.update(key_states, value_states, self.layer_idx)
+
+        query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+        if cross_attention_cache is not None and len(cross_attention_cache) == num_cross_layers:
+            key_states, value_states = cross_attention_cache[self.layer_idx]
+        elif cross_attention_cache is not None and len(cross_attention_cache) < num_cross_layers:
+            key_states = self.k_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
+            value_states = self.v_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
+            key_states, value_states = cross_attention_cache.update(key_states, value_states, self.layer_idx)
+        else:
+            key_states = self.k_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
+            value_states = self.v_proj(cross_attention_states).view(cross_hidden_shape).transpose(1, 2)
             
         if key_states is None or value_states is None:
             raise ValueError("key_states and value_states must be provided")
@@ -451,7 +455,7 @@ class LlamaCrossAttentionLayer(nn.Module):
         cross_attention_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor],
         position_ids: Optional[torch.LongTensor] = None,
-        past_cross_key_value: Optional[Cache] = None,
+        cross_attention_cache: Optional[Cache] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
@@ -468,7 +472,7 @@ class LlamaCrossAttentionLayer(nn.Module):
             cross_attention_states=cross_attention_states,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            past_cross_key_value=past_cross_key_value,
+            cross_attention_cache=cross_attention_cache,
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
@@ -903,6 +907,7 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
         self.gradient_checkpointing = False
+        self.cross_attention_cache = None
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -922,7 +927,6 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         cross_attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
-        past_cross_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
@@ -955,8 +959,8 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
 
-        if use_cache and past_cross_key_values is None:
-            past_cross_key_values = DynamicCache()
+        if use_cache and self.cross_attention_cache is None and is_encoding is not True:
+            self.cross_attention_cache = DynamicCache()
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -1042,7 +1046,7 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
                         cross_attention_states,
                         cross_attention_mask,
                         position_ids,
-                        past_cross_key_values,
+                        self.cross_attention_cache,
                         output_attentions,
                         use_cache,
                         cache_position,
@@ -1054,7 +1058,7 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
                         cross_attention_states=cross_attention_states,
                         attention_mask=cross_attention_mask,
                         position_ids=position_ids,
-                        past_cross_key_value=past_cross_key_values,
+                        cross_attention_cache=self.cross_attention_cache,
                         output_attentions=output_attentions,
                         use_cache=use_cache,
                         cache_position=cache_position,
@@ -1459,10 +1463,14 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
     def set_cross_inputs(self, hidden_states, attention_mask):
         self.cross_hidden_states = hidden_states
         self.cross_attention_mask = attention_mask
+        self.model.cross_attention_cache = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
-    def empty_cross_outputs(self):
+    def empty_cross_inputs(self):
         self.cross_hidden_states = None
         self.cross_attention_mask = None
+        self.model.cross_attention_cache = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
@@ -1543,14 +1551,14 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if self.encoder_hidden_states is None:
-            raise ValueError("You need to set the encoder hidden states before running the decoder.")
+        if self.cross_hidden_states is None:
+            raise ValueError("You need to set the cross hidden states before running the decoder.")
 
         decoder_outputs = self.model(
             input_ids=input_ids,
-            cross_attention_states=self.encoder_hidden_states,
+            cross_attention_states=self.cross_hidden_states,
             attention_mask=attention_mask,
-            cross_attention_mask=self.encoder_attention_mask,
+            cross_attention_mask=self.cross_attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
