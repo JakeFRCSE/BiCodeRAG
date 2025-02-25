@@ -8,4 +8,4 @@ To view weekly research progress report (which is in korean), [click here!](http
 1. LlamaCrossDecoderLayer -> LlamaCrossAttentionLayer
 2. LlamaEncodeModel deleted
 3. LlamaCrossModel -> LlamaBiCodeModel
-4. LlamaCrossDecoderLM -> LlamaBiCodeLM"
+4. LlamaCrossDecoderLM -> LlamaBiCodeLM
