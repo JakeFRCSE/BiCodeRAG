@@ -212,7 +212,7 @@ def eager_attention_forward(
     scaling: float,
     dropout: float = 0.0,
     **kwargs,
-):
+):  
     key_states = repeat_kv(key, module.num_key_value_groups)
     value_states = repeat_kv(value, module.num_key_value_groups)
 
@@ -972,10 +972,10 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
             position_ids = cache_position.unsqueeze(0)
 
         if is_encoding == True:
-            sequence_mask = self._prepare_4d_self_attention_mask(
-                attention_mask, sequence_length=inputs_embeds.shape[1], 
-                dtype=inputs_embeds.dtype, device=inputs_embeds.device, 
-                batch_size=inputs_embeds.shape[0],
+            sequence_mask = self._prepare_4d_attention_mask(
+                attention_mask=attention_mask, sequence_length=inputs_embeds.shape[1],
+                target_length=inputs_embeds.shape[1], dtype=inputs_embeds.dtype, 
+                device=inputs_embeds.device, batch_size=inputs_embeds.shape[0],
             )
         else:
             sequence_mask = self._update_causal_mask(
@@ -992,6 +992,9 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         all_self_attns = () if output_attentions else None
 
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
+            if attention_mask is not None and attention_mask.shape == hidden_states.shape[:2]:
+                padding_token_mask = (attention_mask == 0).unsqueeze(-1).to(hidden_states.device)
+                hidden_states = hidden_states * ((~padding_token_mask).to(hidden_states.dtype))
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -1028,7 +1031,7 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
             if decoder_layer.self_attn.layer_idx % 4 == 3 and is_encoding is not True:
                 cross_layer_idx = decoder_layer.self_attn.layer_idx // 4
                 cross_layer = self.cross_layers[cross_layer_idx]
-                cross_attention_mask = self._prepare_4d_cross_attention_mask(
+                cross_attention_mask = self._prepare_4d_attention_mask(
                                                                          attention_mask=cross_attention_mask,
                                                                          sequence_length=hidden_states.shape[1],
                                                                          target_length = cross_attention_states.shape[1],
@@ -1209,7 +1212,7 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         return causal_mask
 
     @staticmethod
-    def _prepare_4d_cross_attention_mask(
+    def _prepare_4d_attention_mask(
         attention_mask: torch.Tensor,
         sequence_length: int,
         target_length: int,
@@ -1250,50 +1253,6 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
                 mask_length = attention_mask.shape[-1]
                 key_padding = attention_mask[:, None, None, :mask_length] == 0
                 padding_mask = padding_mask.masked_fill(key_padding, min_dtype)
-        return padding_mask
-
-    @staticmethod
-    def _prepare_4d_self_attention_mask(
-        attention_mask: torch.Tensor,
-        sequence_length: int,
-        dtype: torch.dtype,
-        device: torch.device,
-        batch_size: int,
-        **kwargs,
-    ):
-        """
-        Creates a causal 4D mask of shape `(batch_size, 1, sequence_length, sequence_length)` from a 2D mask of shape
-        `(batch_size, sequence_length)`, or if the input `attention_mask` is already 4D, do nothing.
-
-        Args:
-            attention_mask (`torch.Tensor`):
-                A 2D attention mask of shape `(batch_size, sequence_length)` or a 4D attention mask of shape
-                `(batch_size, 1, sequence_length, sequence_length)`.
-            sequence_length (`int`):
-                The sequence length being processed.
-            dtype (`torch.dtype`):
-                The dtype to use for the 4D attention mask.
-            device (`torch.device`):
-                The device to plcae the 4D attention mask on.
-            batch_size (`torch.Tensor`):
-                Batch size.
-        """
-        if attention_mask is not None and attention_mask.dim() == 4:
-            # In this case we assume that the mask comes already in inverted form and requires no inversion or slicing.
-            padding_mask = attention_mask
-        else:
-            min_dtype = torch.finfo(dtype).min
-            padding_mask = torch.zeros(
-            (sequence_length, sequence_length), dtype=dtype, device=device
-            )
-            padding_mask = padding_mask[None, None, :, :].expand(batch_size, 1, -1, -1)
-            if attention_mask is not None:
-                padding_mask = padding_mask.clone()  # copy to contiguous memory for in-place edit
-                mask_length = attention_mask.shape[-1]
-                key_padding = attention_mask[:, None, None, :mask_length] == 0
-                padding_mask = padding_mask.masked_fill(key_padding, min_dtype)
-                query_padding = attention_mask[:, None, :mask_length, None] == 0
-                padding_mask = padding_mask.masked_fill(query_padding, min_dtype)
 
         return padding_mask
 
@@ -1435,6 +1394,7 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
 
     def __init__(self, config):
+        self.pad_token_id = 128002
         super().__init__(config)
         self.model = LlamaBiCodeModel(config)
         self.vocab_size = config.vocab_size
