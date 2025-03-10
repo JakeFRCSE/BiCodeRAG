@@ -1,4 +1,4 @@
-## Currently Working on LLaMA
+## Currently Working on Data Preprocessing
 Please switch to the [feature/data_proprecessing](https://github.com/JakeFRCSE/BiCodeRAG/tree/feature/data_preprocessing) branch to view the latest progress.
 
 ## Research Documentation
