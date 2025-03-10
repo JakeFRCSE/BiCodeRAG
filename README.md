@@ -1,5 +1,5 @@
 # Current Branch is dev/llama!
-To return to the main branch, [click here!](https://github.com/JakeFRCSE/CrossDecoder)
+To return to the main branch, [click here!](https://github.com/JakeFRCSE/BiCodeRAG)
 
 To view weekly research progress report (which is in korean), [click here!](https://crystal-air-942.notion.site/1a041c6bef1680e68685f7890655201b)
 
