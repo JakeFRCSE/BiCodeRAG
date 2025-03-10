@@ -1,5 +1,5 @@
 ## Currently Working on LLaMA
-Please switch to the [dev/llama](https://github.com/JakeFRCSE/CrossDecoder/tree/dev/llama) branch to view the latest progress.
+Please switch to the [feature/data_proprecessing](https://github.com/JakeFRCSE/BiCodeRAG/tree/feature/data_preprocessing) branch to view the latest progress.
 
 ## Research Documentation
 Please click the link to access the Notion page, which is used for organizing ideas.
