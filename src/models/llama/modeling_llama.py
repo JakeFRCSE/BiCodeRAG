@@ -1392,9 +1392,9 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
+    pad_token_id = 128002
 
     def __init__(self, config):
-        self.pad_token_id = 128002
         super().__init__(config)
         self.model = LlamaBiCodeModel(config)
         self.vocab_size = config.vocab_size
