@@ -37,7 +37,7 @@ class Options():
     def add_reader_options(self):
         self.parser.add_argument('--train_data', type=str, default='none', help='path of train data')
         self.parser.add_argument('--eval_data', type=str, default='none', help='path of eval data')
-        self.parser.add_argument('--model_size', type=int, default=1)
+        self.parser.add_argument('--model_size', type=str, default='1B')
         self.parser.add_argument('--use_checkpoint', action='store_true', help='use checkpoint in the encoder')
         self.parser.add_argument('--text_maxlength', type=int, default=200, 
                         help='maximum number of tokens in text segments (question+passage)')

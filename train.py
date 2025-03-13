@@ -15,7 +15,7 @@ import src.slurm
 import src.util
 import src.evaluation
 import src.data
-import src.models.llama.modeling_llama
+import src.models.llama.modeling_llama as llama
 
 
 def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, collator, best_dev_em, checkpoint_path):
@@ -121,6 +121,26 @@ def evaluate(model, dataset, tokenizer, collator, opt):
     exactmatch, total = src.util.weighted_average(np.mean(exactmatch), total, opt)
     return exactmatch
 
+def print_trainable_parameters(model):
+    logger.info("=== Trainable Parameters ===")
+    trainable_params = 0
+    total_params = 0
+    
+    for name, param in model.named_parameters():
+        total_params += param.numel()
+        
+
+        if param.requires_grad:
+            trainable_params += param.numel()
+            logger.info(f"Layer: {name} | Shape: {param.shape} | Trainable: Yes")
+    
+
+    logger.info("\n=== Summary ===")
+    logger.info(f"Total parameters: {total_params:,}")
+    logger.info(f"Trainable parameters: {trainable_params:,}")
+    logger.info(f"Non-trainable parameters: {total_params - trainable_params:,}")
+    logger.info("=================")
+
 if __name__ == "__main__":
     options = Options()
     options.add_reader_options()
@@ -147,11 +167,13 @@ if __name__ == "__main__":
         checkpoint_path / 'run.log'
     )
 
-    model_name = 'llama3.2-' + opt.model_size + 'B'
-    model_class = src.models.llama.modeling_llama.LlamaBiCodeLM
+    model_name = 'meta-llama/llama-3.2-' + opt.model_size
+    model_class = llama.LlamaBiCodeLM
 
     #load data
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+    tokenizer.pad_token_id = model_class.pad_token_id
+    tokenizer.pad_token = tokenizer.added_tokens_decoder[tokenizer.pad_token_id].content
     collator = src.data.Collator(opt.text_maxlength, tokenizer, answer_maxlength=opt.answer_maxlength)
 
     # use golbal rank and world size to split the eval set on multiple gpus
@@ -168,11 +190,9 @@ if __name__ == "__main__":
         world_size=opt.world_size,
     )
     eval_dataset = src.data.Dataset(eval_examples, opt.n_context)
-    # Todo
+    
     if not checkpoint_exists and opt.model_path == "none":
-        t5 = transformers.T5ForConditionalGeneration.from_pretrained(model_name)
-        model = src.model.FiDT5(t5.config)
-        model.load_t5(t5.state_dict())
+        model = llama.LlamaBiCodeLM.from_pretrained(model_name)
         model = model.to(opt.local_rank)
         optimizer, scheduler = src.util.set_optim(opt, model)
         step, best_dev_em = 0, 0.0
@@ -196,7 +216,15 @@ if __name__ == "__main__":
             find_unused_parameters=False,
         )
 
+    
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.model.cross_layers.parameters():
+        param.requires_grad = True
+    print_trainable_parameters(model)
     logger.info("Start training")
+
+    
     train(
         model,
         optimizer,

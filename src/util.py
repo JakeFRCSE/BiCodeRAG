@@ -127,9 +127,11 @@ def set_dropout(model, dropout_rate):
 
 def set_optim(opt, model):
     if opt.optim == 'adam':
-        optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr)
+        optimizer = torch.optim.Adam([p for p in model.model.parameters() if p.requires_grad],
+                                     lr=opt.lr)
     elif opt.optim == 'adamw':
-        optimizer = torch.optim.AdamW(model.parameters(), lr=opt.lr, weight_decay=opt.weight_decay)
+        optimizer = torch.optim.AdamW([p for p in model.model.parameters() if p.requires_grad],
+                                       lr=opt.lr, weight_decay=opt.weight_decay)
     if opt.scheduler == 'fixed':
         scheduler = FixedScheduler(optimizer)
     elif opt.scheduler == 'linear':
