@@ -45,8 +45,8 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
         epoch += 1
         for i, batch in enumerate(train_dataloader):
             step += 1
-            (idx, labels, _, context_ids, context_mask) = batch
-
+            (idx, labels, _, context_ids, context_mask, question_ids, question_masks) = batch
+            #TODO
             train_loss = model(
                 input_ids=context_ids.cuda(),
                 attention_mask=context_mask.cuda(),

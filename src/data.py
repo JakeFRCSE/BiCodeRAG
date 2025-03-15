@@ -74,7 +74,7 @@ def encode_passages(batch_text_passages, tokenizer, max_length):
         p = tokenizer(
             text_passages,
             max_length=max_length,
-            pad_to_max_length=True,
+            padding=True,
             return_tensors='pt',
             truncation=True
         )
@@ -98,7 +98,7 @@ class Collator(object):
         target = self.tokenizer(
             target,
             max_length=self.answer_maxlength if self.answer_maxlength > 0 else None,
-            pad_to_max_length=True,
+            padding=True,
             return_tensors='pt',
             truncation=True if self.answer_maxlength > 0 else False,
         )
@@ -114,8 +114,17 @@ class Collator(object):
         passage_ids, passage_masks = encode_passages(text_passages,
                                                      self.tokenizer,
                                                      self.text_maxlength)
+        
+        question = [ex['question'] + " answer:" for ex in batch]
+        question_ids, question_masks = self.tokenizer(
+            question,
+            padding = True,
+            padding_side = "left",
+            return_tensors='pt',
+            truncation=True if self.answer_maxlength > 0 else False,                                          
+        )
 
-        return (index, target_ids, target_mask, passage_ids, passage_masks)
+        return (index, target_ids, target_mask, passage_ids, passage_masks, question_ids, question_masks)
 
 def load_data(data_path=None, global_rank=-1, world_size=-1):
     assert data_path
@@ -154,7 +163,7 @@ class RetrieverCollator(object):
         question = [ex['question'] for ex in batch]
         question = self.tokenizer(
             question,
-            pad_to_max_length=True,
+            padding=True,
             return_tensors="pt",
             max_length=self.question_maxlength,
             truncation=True
@@ -204,7 +213,7 @@ class TextCollator(object):
         index = [x[0] for x in batch]
         encoded_batch = self.tokenizer(
             [x[1] for x in batch],
-            pad_to_max_length=True,
+            padding=True,
             return_tensors="pt",
             max_length=self.maxlength,
             truncation=True
