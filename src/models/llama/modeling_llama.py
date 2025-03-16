@@ -1433,6 +1433,14 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
         self.model.cross_attention_cache = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+    def set_checkpoint(self, use_checkpoint):
+        """
+        Enable or disable checkpointing in the encoder.
+        See https://pytorch.org/docs/stable/checkpoint.html
+        """
+        for mod in self.model.cross_layers:
+            mod.use_checkpoint = use_checkpoint
         
         
 
