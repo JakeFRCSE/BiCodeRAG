@@ -45,11 +45,21 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
         epoch += 1
         for i, batch in enumerate(train_dataloader):
             step += 1
-            (idx, labels, _, context_ids, context_mask, question_ids, question_masks) = batch
-            #TODO
+            (idx, labels, _, context_ids, context_mask, question_ids, question_mask) = batch
+            
+            encoded_context = model.encode(
+                input_ids = context_ids,
+                attention_mask = context_mask
+            )
+
+            model.set_cross_inputs(
+                hidden_states = encoded_context[0],
+                attention_mask = context_mask
+            )
+
             train_loss = model(
-                input_ids=context_ids.cuda(),
-                attention_mask=context_mask.cuda(),
+                input_ids=question_ids.cuda(),
+                attention_mask=question_mask.cuda(),
                 labels=labels.cuda()
             )[0]
 
@@ -103,11 +113,21 @@ def evaluate(model, dataset, tokenizer, collator, opt):
     model = model.module if hasattr(model, "module") else model
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
-            (idx, _, _, context_ids, context_mask) = batch
+            (idx, _, _, context_ids, context_mask, question_ids, question_mask) = batch
+
+            encoded_context = model.encode(
+                input_ids = context_ids,
+                attention_mask = context_mask
+            )
+
+            model.set_cross_inputs(
+                hidden_states = encoded_context[0],
+                attention_mask = context_mask
+            )
 
             outputs = model.generate(
-                input_ids=context_ids.cuda(),
-                attention_mask=context_mask.cuda(),
+                input_ids=question_ids.cuda(),
+                attention_mask=question_mask.cuda(),
                 max_length=50
             )
 
