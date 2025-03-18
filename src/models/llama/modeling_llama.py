@@ -1560,7 +1560,7 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
             past_key_values=decoder_outputs.past_key_values,
             hidden_states=decoder_outputs.hidden_states,
             attentions=decoder_outputs.attentions,
-        )
+        ) 
 
 @add_start_docstrings(
     """
