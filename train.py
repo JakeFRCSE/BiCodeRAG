@@ -34,7 +34,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
         sampler=train_sampler,
         batch_size=opt.per_gpu_batch_size,
         drop_last=True,
-        num_workers=10,
+        num_workers=8,
         collate_fn=collator
     )
 
@@ -48,19 +48,19 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             (idx, labels, _, context_ids, context_mask, question_ids, question_mask) = batch
             
             encoded_context = model.encode(
-                input_ids = context_ids,
-                attention_mask = context_mask
+                input_ids = context_ids.to(model.device),
+                attention_mask = context_mask.to(model.device)
             )
 
             model.set_cross_inputs(
-                hidden_states = encoded_context[0],
-                attention_mask = context_mask
+                hidden_states = encoded_context[0].to(model.device),
+                attention_mask = context_mask.to(model.device),
             )
-
+            logger.info(f"question_ids: {question_ids}\nquestion_mask: {question_mask}\nlabels: {labels}")
             train_loss = model(
-                input_ids=question_ids.cuda(),
-                attention_mask=question_mask.cuda(),
-                labels=labels.cuda()
+                input_ids=question_ids.to(model.device),
+                attention_mask=question_mask.to(model.device),
+                labels=labels.to(model.device),
             )[0]
 
             train_loss.backward()
@@ -116,18 +116,18 @@ def evaluate(model, dataset, tokenizer, collator, opt):
             (idx, _, _, context_ids, context_mask, question_ids, question_mask) = batch
 
             encoded_context = model.encode(
-                input_ids = context_ids,
-                attention_mask = context_mask
+                input_ids = context_ids.to(model.device),
+                attention_mask = context_mask.to(model.device),
             )
 
             model.set_cross_inputs(
-                hidden_states = encoded_context[0],
-                attention_mask = context_mask
+                hidden_states = encoded_context[0].to(model.device),
+                attention_mask = context_mask.to(model.device),
             )
 
             outputs = model.generate(
-                input_ids=question_ids.cuda(),
-                attention_mask=question_mask.cuda(),
+                input_ids=question_ids.to(model.device),
+                attention_mask=question_mask.to(model.device),
                 max_length=50
             )
 

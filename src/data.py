@@ -78,8 +78,8 @@ def encode_passages(batch_text_passages, tokenizer, max_length):
             return_tensors='pt',
             truncation=True
         )
-        passage_ids.append(p['input_ids'][None])
-        passage_masks.append(p['attention_mask'][None])
+        passage_ids.append(p['input_ids'])
+        passage_masks.append(p['attention_mask'])
 
     passage_ids = torch.cat(passage_ids, dim=0)
     passage_masks = torch.cat(passage_masks, dim=0)
@@ -116,13 +116,15 @@ class Collator(object):
                                                      self.text_maxlength)
         
         question = [ex['question'] + " answer:" for ex in batch]
-        question_ids, question_masks = self.tokenizer(
+        question_tokenized = self.tokenizer(
             question,
             padding = True,
             padding_side = "left",
             return_tensors='pt',
             truncation=True if self.answer_maxlength > 0 else False,                                          
         )
+        question_ids = question_tokenized["input_ids"]
+        question_masks = question_tokenized["attention_mask"].bool()
 
         return (index, target_ids, target_mask, passage_ids, passage_masks, question_ids, question_masks)
 

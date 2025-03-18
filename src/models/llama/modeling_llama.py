@@ -933,7 +933,6 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        *,
         is_encoding: Optional[bool] = None,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[Tuple, BaseModelOutputWithPast]:
@@ -971,7 +970,7 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        if is_encoding == True:
+        if is_encoding != True:
             sequence_mask = self._prepare_4d_attention_mask(
                 attention_mask=attention_mask, sequence_length=inputs_embeds.shape[1],
                 target_length=inputs_embeds.shape[1], dtype=inputs_embeds.dtype, 
@@ -1365,6 +1364,8 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         )
 
         hidden_states = outputs[0]
+
+        #TODO: align tensor of logits and labels
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
@@ -1560,7 +1561,7 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
             past_key_values=decoder_outputs.past_key_values,
             hidden_states=decoder_outputs.hidden_states,
             attentions=decoder_outputs.attentions,
-        ) 
+        )
 
 @add_start_docstrings(
     """
