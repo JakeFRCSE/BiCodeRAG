@@ -108,7 +108,7 @@ def evaluate(model, dataset, tokenizer, collator, opt):
         sampler=sampler,
         batch_size=opt.per_gpu_batch_size,
         drop_last=False,
-        num_workers=10,
+        num_workers=8,
         collate_fn=collator
     )
     model.eval()
@@ -118,6 +118,11 @@ def evaluate(model, dataset, tokenizer, collator, opt):
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
             (idx, _, _, context_ids, context_mask, question_ids, question_mask) = batch
+
+            context_ids = context_ids.view(opt.per_gpu_batch_size, -1) 
+            context_mask = context_mask.view(opt.per_gpu_batch_size, -1)
+
+            logger.info(f"step: {i}")
 
             encoded_context = model.encode(
                 input_ids = context_ids.to(model.device),
@@ -137,6 +142,7 @@ def evaluate(model, dataset, tokenizer, collator, opt):
 
             for k, o in enumerate(outputs):
                 ans = tokenizer.decode(o, skip_special_tokens=True)
+                logger.info(f"ans: {ans}")
                 gold = dataset.get_example(idx[k])['answers']
                 score = src.evaluation.ems(ans, gold)
                 total += 1

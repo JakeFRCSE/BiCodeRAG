@@ -104,7 +104,7 @@ class Collator(object):
                                                      self.tokenizer,
                                                      self.text_maxlength)
         
-        question = [ex['question'] + " " + ex['target'] for ex in batch]
+        question = [ex['question'] + " " + ex['target'] if ex['target'] else ex['question'] + " " for ex in batch]
         question_tokenized = self.tokenizer(
             question,
             padding = True,
