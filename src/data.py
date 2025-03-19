@@ -69,7 +69,7 @@ class Dataset(torch.utils.data.Dataset):
         return self.data[index]
 
 def encode_passages(batch_text_passages, tokenizer, max_length):
-    passage_ids, passage_masks = [], []
+    passage_ids, passage_mask = [], []
     for k, text_passages in enumerate(batch_text_passages):
         p = tokenizer(
             text_passages,
@@ -79,11 +79,11 @@ def encode_passages(batch_text_passages, tokenizer, max_length):
             truncation=True
         )
         passage_ids.append(p['input_ids'])
-        passage_masks.append(p['attention_mask'])
+        passage_mask.append(p['attention_mask'])
 
     passage_ids = torch.cat(passage_ids, dim=0)
-    passage_masks = torch.cat(passage_masks, dim=0)
-    return passage_ids, passage_masks.bool()
+    passage_mask = torch.cat(passage_mask, dim=0)
+    return passage_ids, passage_mask.bool()
 
 class Collator(object):
     def __init__(self, text_maxlength, tokenizer, answer_maxlength=20):
@@ -94,39 +94,35 @@ class Collator(object):
     def __call__(self, batch):
         assert(batch[0]['target'] != None)
         index = torch.tensor([ex['index'] for ex in batch])
-        target = [ex['target'] for ex in batch]
-        target = self.tokenizer(
-            target,
-            max_length=self.answer_maxlength if self.answer_maxlength > 0 else None,
-            padding=True,
-            return_tensors='pt',
-            truncation=True if self.answer_maxlength > 0 else False,
-        )
-        target_ids = target["input_ids"]
-        target_mask = target["attention_mask"].bool()
-        target_ids = target_ids.masked_fill(~target_mask, -100)
-
+        
         def append_question(example):
             if example['passages'] is None:
                 return [example['question']]
             return [example['question'] + " " + t for t in example['passages']]
         text_passages = [append_question(example) for example in batch]
-        passage_ids, passage_masks = encode_passages(text_passages,
+        passage_ids, passage_mask = encode_passages(text_passages,
                                                      self.tokenizer,
                                                      self.text_maxlength)
         
-        question = [ex['question'] + " answer:" for ex in batch]
+        question = [ex['question'] + " " + ex['target'] for ex in batch]
         question_tokenized = self.tokenizer(
             question,
             padding = True,
-            padding_side = "left",
+            padding_side = "right", 
             return_tensors='pt',
             truncation=True if self.answer_maxlength > 0 else False,                                          
         )
         question_ids = question_tokenized["input_ids"]
         question_masks = question_tokenized["attention_mask"].bool()
 
-        return (index, target_ids, target_mask, passage_ids, passage_masks, question_ids, question_masks)
+        input_ids = question_ids[:, :-1]
+        input_mask = question_masks[:, :-1]
+        
+        target_ids = question_ids[:, 1:]
+        target_mask = question_masks[:, 1:]
+        target_ids = target_ids.masked_fill(~target_mask, -100)
+
+        return (index, target_ids, target_mask, passage_ids, passage_mask, input_ids, input_mask)
 
 def load_data(data_path=None, global_rank=-1, world_size=-1):
     assert data_path

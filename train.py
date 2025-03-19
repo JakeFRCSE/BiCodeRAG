@@ -47,6 +47,9 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             step += 1
             (idx, labels, _, context_ids, context_mask, question_ids, question_mask) = batch
             
+
+            context_ids = context_ids.view(opt.per_gpu_batch_size, -1) 
+            context_mask = context_mask.view(opt.per_gpu_batch_size, -1)
             encoded_context = model.encode(
                 input_ids = context_ids.to(model.device),
                 attention_mask = context_mask.to(model.device)
@@ -56,7 +59,8 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                 hidden_states = encoded_context[0].to(model.device),
                 attention_mask = context_mask.to(model.device),
             )
-            logger.info(f"question_ids: {question_ids}\nquestion_mask: {question_mask}\nlabels: {labels}")
+            
+            
             train_loss = model(
                 input_ids=question_ids.to(model.device),
                 attention_mask=question_mask.to(model.device),
@@ -64,7 +68,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             )[0]
 
             train_loss.backward()
-
+            logger.info(f"step: {step}, train_loss: {train_loss}")
             if step % opt.accumulation_steps == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), opt.clip)
                 optimizer.step()
