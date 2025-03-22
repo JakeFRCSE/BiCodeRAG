@@ -137,15 +137,16 @@ def evaluate(model, dataset, tokenizer, collator, opt):
             outputs = model.generate(
                 input_ids=question_ids.to(model.device),
                 attention_mask=question_mask.to(model.device),
-                max_length=50
+                max_length=50,
+                pad_token_id=tokenizer.pad_token_id,
             )
 
             for k, o in enumerate(outputs):
                 ans = tokenizer.decode(o, skip_special_tokens=True)
-                logger.info(f"ans: {ans}")
                 gold = dataset.get_example(idx[k])['answers']
                 score = src.evaluation.ems(ans, gold)
                 total += 1
+                logger.info(f"ans: {ans}\ngold: {gold}\nscore: {score}")
                 exactmatch.append(score)
 
     exactmatch, total = src.util.weighted_average(np.mean(exactmatch), total, opt)
@@ -221,16 +222,11 @@ if __name__ == "__main__":
     )
     eval_dataset = src.data.Dataset(eval_examples, opt.n_context)
     
-    if not checkpoint_exists and opt.model_path == "none":
+    if opt.model_path == "none":
         model = llama.LlamaBiCodeLM.from_pretrained(model_name)
         model = model.to(opt.local_rank)
         optimizer, scheduler = src.util.set_optim(opt, model)
         step, best_dev_em = 0, 0.0
-    elif opt.model_path == "none":
-        load_path = checkpoint_path / 'checkpoint' / 'latest'
-        model, optimizer, scheduler, opt_checkpoint, step, best_dev_em = \
-            src.util.load(model_class, load_path, opt, reset_params=False)
-        logger.info(f"Model loaded from {load_path}")
     else:
         model, optimizer, scheduler, opt_checkpoint, step, best_dev_em = \
             src.util.load(model_class, opt.model_path, opt, reset_params=True)
