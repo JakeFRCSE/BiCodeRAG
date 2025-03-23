@@ -19,7 +19,10 @@ import src.models.llama.modeling_llama as llama
 
 
 def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, collator, best_dev_em, checkpoint_path):
-
+    # 학습용 시드 설정
+    train_seed = opt.seed
+    torch.manual_seed(train_seed)
+    
     if opt.is_main:
         try:
             tb_logger = torch.utils.tensorboard.SummaryWriter(Path(opt.checkpoint_dir)/opt.name)
@@ -27,7 +30,6 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             tb_logger = None
             logger.warning('Tensorboard is not available.')
 
-    torch.manual_seed(opt.global_rank + opt.seed) #different seed for different sampling depending on global_rank
     train_sampler = RandomSampler(train_dataset)
     train_dataloader = DataLoader(
         train_dataset,
@@ -79,7 +81,9 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             curr_loss += train_loss.item()
 
             if step % opt.eval_freq == 0:
-                dev_em = evaluate(model, eval_dataset, tokenizer, collator, opt)
+                # 평가 시에는 다른 시드 사용 (step을 시드로 활용)
+                eval_seed = opt.seed + step
+                dev_em = evaluate(model, eval_dataset, tokenizer, collator, opt, eval_seed)
                 model.train()
                 if opt.is_main:
                     if dev_em > best_dev_em:
@@ -102,19 +106,30 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             if step > opt.total_steps:
                 break
 
-def evaluate(model, dataset, tokenizer, collator, opt):
-    sampler = SequentialSampler(dataset)
-    dataloader = DataLoader(dataset,
+def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
+    # 평가용 시드 설정
+    torch.manual_seed(eval_seed)
+    
+    # 평가할 스텝 수만큼만 데이터를 사용하도록 수정
+    eval_size = min(len(dataset), opt.eval_steps * opt.per_gpu_batch_size)
+    eval_indices = torch.randperm(len(dataset))[:eval_size]
+    eval_subset = torch.utils.data.Subset(dataset, eval_indices)
+    
+    sampler = SequentialSampler(eval_subset)
+    dataloader = DataLoader(
+        eval_subset,
         sampler=sampler,
         batch_size=opt.per_gpu_batch_size,
         drop_last=False,
         num_workers=8,
         collate_fn=collator
     )
+    
     model.eval()
     total = 0
     exactmatch = []
     model = model.module if hasattr(model, "module") else model
+    
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
             (idx, _, _, context_ids, context_mask, question_ids, question_mask) = batch
@@ -122,7 +137,7 @@ def evaluate(model, dataset, tokenizer, collator, opt):
             context_ids = context_ids.view(opt.per_gpu_batch_size, -1) 
             context_mask = context_mask.view(opt.per_gpu_batch_size, -1)
 
-            logger.info(f"step: {i}")
+            logger.info(f"step: {i}\n")
 
             encoded_context = model.encode(
                 input_ids = context_ids.to(model.device),
@@ -146,7 +161,7 @@ def evaluate(model, dataset, tokenizer, collator, opt):
                 gold = dataset.get_example(idx[k])['answers']
                 score = src.evaluation.ems(ans, gold)
                 total += 1
-                logger.info(f"ans: {ans}\ngold: {gold}\nscore: {score}")
+                logger.info(f"\nans: {ans}\ngold: {gold}\nscore: {score}")
                 exactmatch.append(score)
 
     exactmatch, total = src.util.weighted_average(np.mean(exactmatch), total, opt)
@@ -205,6 +220,7 @@ if __name__ == "__main__":
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token_id = model_class.pad_token_id
     tokenizer.pad_token = tokenizer.added_tokens_decoder[tokenizer.pad_token_id].content
+    tokenizer.padding_side = 'left'
     collator = src.data.Collator(opt.text_maxlength, tokenizer, answer_maxlength=opt.answer_maxlength)
 
     # use golbal rank and world size to split the eval set on multiple gpus
@@ -242,11 +258,14 @@ if __name__ == "__main__":
             find_unused_parameters=False,
         )
 
-    
-    for param in model.parameters():
-        param.requires_grad = False
-    for param in model.model.cross_layers.parameters():
-        param.requires_grad = True
+    if opt.cross_attention_layer_only:
+        for param in model.parameters():
+            param.requires_grad = False
+        for param in model.model.cross_layers.parameters():
+            param.requires_grad = True
+    else:
+        for param in model.parameters():
+            param.requires_grad = True
     print_trainable_parameters(model)
     logger.info("Start training")
 

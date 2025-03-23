@@ -69,21 +69,26 @@ class Dataset(torch.utils.data.Dataset):
         return self.data[index]
 
 def encode_passages(batch_text_passages, tokenizer, max_length):
-    passage_ids, passage_mask = [], []
-    for k, text_passages in enumerate(batch_text_passages):
+    passage_ids, passage_masks = [], []
+    for text_passages in batch_text_passages:
+        # 각 패시지를 토큰화
         p = tokenizer(
             text_passages,
             max_length=max_length,
-            padding=True,
-            return_tensors='pt',
-            truncation=True
+            padding='max_length',
+            truncation=True,
+            return_tensors='pt'
         )
+        
+        # 패딩된 텐서를 리스트에 추가
         passage_ids.append(p['input_ids'])
-        passage_mask.append(p['attention_mask'])
-
+        passage_masks.append(p['attention_mask'])
+    
+    # 배치 차원을 기준으로 텐서 연결
     passage_ids = torch.cat(passage_ids, dim=0)
-    passage_mask = torch.cat(passage_mask, dim=0)
-    return passage_ids, passage_mask.bool()
+    passage_masks = torch.cat(passage_masks, dim=0)
+    
+    return passage_ids, passage_masks
 
 class Collator(object):
     def __init__(self, text_maxlength, tokenizer, answer_maxlength=20):
@@ -108,7 +113,7 @@ class Collator(object):
         question_tokenized = self.tokenizer(
             question,
             padding = True,
-            padding_side = "right", 
+            padding_side = "left", 
             return_tensors='pt',
             truncation=True if self.answer_maxlength > 0 else False,                                          
         )
