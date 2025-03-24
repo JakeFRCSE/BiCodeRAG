@@ -90,7 +90,7 @@ class Options():
                         help='print intermdiate results of evaluation every <eval_print_freq> steps')
         self.parser.add_argument('--eval_steps', type=int, default=100,
                         help='evaluate model for <eval_steps> steps during training')
-        self.parser.add_argument('--cross_attention_layer_only', type=bool, default=True,
+        self.parser.add_argument('--cross_attention_layer_only', type=str, default='True',
                                  help='train only the cross-attention layer')
 
 

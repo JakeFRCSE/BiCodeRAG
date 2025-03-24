@@ -1562,6 +1562,23 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
             attentions=decoder_outputs.attentions,
         )
 
+    def loss_function(self, logits, labels, vocab_size, **kwargs):
+        # Shift so that tokens < n predict n
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        
+        # Flatten the tokens
+        loss_fct = nn.CrossEntropyLoss(reduction='none')
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+        
+        # 패딩 토큰(-100)을 제외하고 loss 계산
+        loss = loss_fct(shift_logits, shift_labels)
+        # 패딩 토큰이 아닌 위치만 평균 계산
+        loss = loss[shift_labels != -100].mean()
+        
+        return loss
+
 @add_start_docstrings(
     """
     The LLaMa Model transformer with a sequence classification head on top (linear layer).

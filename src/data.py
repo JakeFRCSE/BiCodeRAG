@@ -109,7 +109,7 @@ class Collator(object):
                                                      self.tokenizer,
                                                      self.text_maxlength)
         
-        question = [ex['question'] + " " + ex['target'] if ex['target'] else ex['question'] + " " for ex in batch]
+        question = [ex['question'] for ex in batch]
         question_tokenized = self.tokenizer(
             question,
             padding = True,
@@ -120,14 +120,25 @@ class Collator(object):
         question_ids = question_tokenized["input_ids"]
         question_masks = question_tokenized["attention_mask"].bool()
 
-        input_ids = question_ids[:, :-1]
-        input_mask = question_masks[:, :-1]
+        question_answer = [ex['question'] + " " + ex['target'] if ex['target'] else ex['question'] + " " for ex in batch]
+        question_answer_tokenized = self.tokenizer(
+            question_answer,
+            padding = True,
+            padding_side = "left", 
+            return_tensors='pt',
+            truncation=True if self.answer_maxlength > 0 else False,                                          
+        )
+        question_answer_ids = question_answer_tokenized["input_ids"]
+        question_answer_masks = question_answer_tokenized["attention_mask"].bool()
         
-        target_ids = question_ids[:, 1:]
-        target_mask = question_masks[:, 1:]
+        input_ids = question_answer_ids[:, :-1]
+        input_mask = question_answer_masks[:, :-1]
+        
+        target_ids = question_answer_ids[:, 1:]
+        target_mask = question_answer_masks[:, 1:]
         target_ids = target_ids.masked_fill(~target_mask, -100)
 
-        return (index, target_ids, target_mask, passage_ids, passage_mask, input_ids, input_mask)
+        return (index, target_ids, target_mask, passage_ids, passage_mask, input_ids, input_mask, question_ids, question_masks)
 
 def load_data(data_path=None, global_rank=-1, world_size=-1):
     assert data_path

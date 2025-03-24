@@ -47,7 +47,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
         epoch += 1
         for i, batch in enumerate(train_dataloader):
             step += 1
-            (idx, labels, _, context_ids, context_mask, question_ids, question_mask) = batch
+            (idx, labels, _, context_ids, context_mask, question_ids, question_mask, _, _) = batch
             
 
             context_ids = context_ids.view(opt.per_gpu_batch_size, -1) 
@@ -132,7 +132,7 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
     
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
-            (idx, _, _, context_ids, context_mask, question_ids, question_mask) = batch
+            (idx, _, _, context_ids, context_mask, input_ids, input_mask, question_ids, question_mask) = batch
 
             context_ids = context_ids.view(opt.per_gpu_batch_size, -1) 
             context_mask = context_mask.view(opt.per_gpu_batch_size, -1)
@@ -149,11 +149,19 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
                 attention_mask = context_mask.to(model.device),
             )
 
+            # 질문만 입력으로 사용하고 정답은 제외
             outputs = model.generate(
                 input_ids=question_ids.to(model.device),
                 attention_mask=question_mask.to(model.device),
                 max_length=50,
                 pad_token_id=tokenizer.pad_token_id,
+                do_sample=False,  # greedy decoding
+                num_beams=1,  # beam search 사용하지 않음
+                early_stopping=True,
+                no_repeat_ngram_size=3,  # 반복 방지
+                temperature=1.0,  # temperature 1.0으로 설정하여 greedy decoding
+                top_k=1,  # top-k sampling 사용하지 않음
+                top_p=1.0,  # nucleus sampling 사용하지 않음
             )
 
             for k, o in enumerate(outputs):
@@ -161,7 +169,7 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
                 gold = dataset.get_example(idx[k])['answers']
                 score = src.evaluation.ems(ans, gold)
                 total += 1
-                logger.info(f"\nans: {ans}\ngold: {gold}\nscore: {score}")
+                logger.info(f"\nquestion_ids: {question_ids[k]}\ntokens: {o}\nans: {ans}\ngold: {gold}\nscore: {score}")
                 exactmatch.append(score)
 
     exactmatch, total = src.util.weighted_average(np.mean(exactmatch), total, opt)
@@ -258,7 +266,7 @@ if __name__ == "__main__":
             find_unused_parameters=False,
         )
 
-    if opt.cross_attention_layer_only:
+    if opt.cross_attention_layer_only == 'True':
         for param in model.parameters():
             param.requires_grad = False
         for param in model.model.cross_layers.parameters():
