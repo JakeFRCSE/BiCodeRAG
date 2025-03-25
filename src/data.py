@@ -13,12 +13,14 @@ class Dataset(torch.utils.data.Dataset):
                  n_context=None,
                  question_prefix='question:',
                  title_prefix='title:',
-                 passage_prefix='context:'):
+                 passage_prefix='context:',
+                 answer_prefix='answer:'):
         self.data = data
         self.n_context = n_context
         self.question_prefix = question_prefix
         self.title_prefix = title_prefix
         self.passage_prefix = passage_prefix
+        self.answer_prefix = answer_prefix
         self.sort_data()
 
     def __len__(self):
@@ -27,9 +29,9 @@ class Dataset(torch.utils.data.Dataset):
     def get_target(self, example):
         if 'target' in example:
             target = example['target']
-            return target + ' </s>'
+            return self.answer_prefix + " " + target + ' </s>'
         elif 'answers' in example:
-            return random.choice(example['answers']) + ' </s>'
+            return self.answer_prefix + " " + random.choice(example['answers']) + ' </s>'
         else:
             return None
 
@@ -109,7 +111,7 @@ class Collator(object):
                                                      self.tokenizer,
                                                      self.text_maxlength)
         
-        question = [ex['question'] for ex in batch]
+        question = [ex['question'] + " answer: " for ex in batch]
         question_tokenized = self.tokenizer(
             question,
             padding = True,

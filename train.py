@@ -45,6 +45,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
     model.train()
     while step < opt.total_steps:
         epoch += 1
+        logger.info(f"Epoch {epoch} started")
         for i, batch in enumerate(train_dataloader):
             step += 1
             (idx, labels, _, context_ids, context_mask, question_ids, question_mask, _, _) = batch
@@ -111,7 +112,7 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
     torch.manual_seed(eval_seed)
     
     # 평가할 스텝 수만큼만 데이터를 사용하도록 수정
-    eval_size = min(len(dataset), opt.eval_steps * opt.per_gpu_batch_size)
+    eval_size = min(len(dataset), opt.eval_steps * opt.per_gpu_eval_batch_size)
     eval_indices = torch.randperm(len(dataset))[:eval_size]
     eval_subset = torch.utils.data.Subset(dataset, eval_indices)
     
@@ -119,7 +120,7 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
     dataloader = DataLoader(
         eval_subset,
         sampler=sampler,
-        batch_size=opt.per_gpu_batch_size,
+        batch_size=opt.per_gpu_eval_batch_size,
         drop_last=False,
         num_workers=8,
         collate_fn=collator
@@ -134,8 +135,8 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
         for i, batch in enumerate(dataloader):
             (idx, _, _, context_ids, context_mask, input_ids, input_mask, question_ids, question_mask) = batch
 
-            context_ids = context_ids.view(opt.per_gpu_batch_size, -1) 
-            context_mask = context_mask.view(opt.per_gpu_batch_size, -1)
+            context_ids = context_ids.view(opt.per_gpu_eval_batch_size, -1) 
+            context_mask = context_mask.view(opt.per_gpu_eval_batch_size, -1)
 
             logger.info(f"step: {i}\n")
 

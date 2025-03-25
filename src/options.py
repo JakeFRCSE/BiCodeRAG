@@ -92,6 +92,8 @@ class Options():
                         help='evaluate model for <eval_steps> steps during training')
         self.parser.add_argument('--cross_attention_layer_only', type=str, default='True',
                                  help='train only the cross-attention layer')
+        self.parser.add_argument("--per_gpu_eval_batch_size", type=int, default=1,
+                                 help="Batch size per GPU/CPU for evaluation.")
 
 
     def print_options(self, opt):
