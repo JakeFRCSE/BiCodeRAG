@@ -41,7 +41,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
     )
 
     loss, curr_loss = 0.0, 0.0
-    epoch = 1
+    epoch = 0
     model.train()
     while step < opt.total_steps:
         epoch += 1
@@ -156,13 +156,6 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
                 attention_mask=question_mask.to(model.device),
                 max_length=50,
                 pad_token_id=tokenizer.pad_token_id,
-                do_sample=False,  # greedy decoding
-                num_beams=1,  # beam search 사용하지 않음
-                early_stopping=True,
-                no_repeat_ngram_size=3,  # 반복 방지
-                temperature=1.0,  # temperature 1.0으로 설정하여 greedy decoding
-                top_k=1,  # top-k sampling 사용하지 않음
-                top_p=1.0,  # nucleus sampling 사용하지 않음
             )
 
             for k, o in enumerate(outputs):
@@ -170,7 +163,7 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
                 gold = dataset.get_example(idx[k])['answers']
                 score = src.evaluation.ems(ans, gold)
                 total += 1
-                logger.info(f"\nquestion_ids: {question_ids[k]}\ntokens: {o}\nans: {ans}\ngold: {gold}\nscore: {score}")
+                logger.info(f"\n{ans}\ngold: {gold}\nscore: {score}")
                 exactmatch.append(score)
 
     exactmatch, total = src.util.weighted_average(np.mean(exactmatch), total, opt)
@@ -267,7 +260,7 @@ if __name__ == "__main__":
             find_unused_parameters=False,
         )
 
-    if opt.cross_attention_layer_only == 'True':
+    if opt.cross_attention_layer_only == True:
         for param in model.parameters():
             param.requires_grad = False
         for param in model.model.cross_layers.parameters():
