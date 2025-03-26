@@ -90,7 +90,7 @@ class Options():
                         help='print intermdiate results of evaluation every <eval_print_freq> steps')
         self.parser.add_argument('--eval_steps', type=int, default=100,
                         help='evaluate model for <eval_steps> steps during training')
-        self.parser.add_argument('--cross_attention_layer_only', type=str, default='True',
+        self.parser.add_argument('--cross_attention_layer_only', action='store_true',
                                  help='train only the cross-attention layer')
         self.parser.add_argument("--per_gpu_eval_batch_size", type=int, default=1,
                                  help="Batch size per GPU/CPU for evaluation.")

@@ -32,12 +32,14 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
         fw = open(write_path / ('%d.txt'%opt.global_rank), 'a')
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
-            (idx, _, _, context_ids, context_mask, question_ids, question_mask) = batch
+            (idx, _, _, context_ids, context_mask, input_ids, input_mask, question_ids, question_mask) = batch
 
             if opt.write_crossattention_scores:
                 model.reset_score_storage()
 
             # 컨텍스트 인코딩
+            context_ids = context_ids.view(opt.per_gpu_batch_size, -1)
+            context_mask = context_mask.view(opt.per_gpu_batch_size, -1)
             encoded_context = model.encode(
                 input_ids=context_ids.to(model.device),
                 attention_mask=context_mask.to(model.device)
@@ -72,7 +74,7 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
                 if opt.write_crossattention_scores:
                     for j in range(context_ids.size(1)):
                         example['ctxs'][j]['score'] = crossattention_scores[k, j].item()
-
+                logger.info(f"\n{ans}\ngold: {example['answers']}\nscore: {score}")
                 total += 1
             if (i + 1) % opt.eval_print_freq == 0:
                 log = f'Process rank:{opt.global_rank}, {i+1} / {len(dataloader)}'
@@ -134,13 +136,13 @@ if __name__ == "__main__":
         eval_dataset, 
         sampler=eval_sampler, 
         batch_size=opt.per_gpu_batch_size,
-        num_workers=20, 
+        num_workers=8, 
         collate_fn=collator_function
     )
     
     # 모델 로드
     model = model_class.from_pretrained(opt.model_path)
-    model = model.to(opt.device)
+    model = model.to(opt.local_rank)
 
     logger.info("Start eval")
     exactmatch, total = evaluate(model, eval_dataset, eval_dataloader, tokenizer, opt)
