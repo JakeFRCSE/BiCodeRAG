@@ -65,4 +65,4 @@ python test.py \
 ```
 
 
-All of the files introduced at current branch is copied from [facebookresearch/FiD](https://github.com/facebookresearch/FiD/tree/main) 
+All of the files are based on [facebookresearch/FiD](https://github.com/facebookresearch/FiD/tree/main) and [transformers library](https://github.com/huggingface/transformers) 
