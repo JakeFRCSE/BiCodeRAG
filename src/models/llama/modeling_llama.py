@@ -378,7 +378,7 @@ class LlamaCrossAttention(nn.Module):
             scaling=self.scaling,
             **kwargs,
         )
-
+        
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         return attn_output, attn_weights
@@ -933,7 +933,6 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        *,
         is_encoding: Optional[bool] = None,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[Tuple, BaseModelOutputWithPast]:
@@ -971,7 +970,7 @@ class LlamaBiCodeModel(LlamaPreTrainedModel):
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        if is_encoding == True:
+        if is_encoding != True:
             sequence_mask = self._prepare_4d_attention_mask(
                 attention_mask=attention_mask, sequence_length=inputs_embeds.shape[1],
                 target_length=inputs_embeds.shape[1], dtype=inputs_embeds.dtype, 
@@ -1365,6 +1364,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         )
 
         hidden_states = outputs[0]
+
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
@@ -1392,9 +1392,9 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
+    pad_token_id = 128002
 
     def __init__(self, config):
-        self.pad_token_id = 128002
         super().__init__(config)
         self.model = LlamaBiCodeModel(config)
         self.vocab_size = config.vocab_size
@@ -1433,6 +1433,14 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
         self.model.cross_attention_cache = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+    def set_checkpoint(self, use_checkpoint):
+        """
+        Enable or disable checkpointing in the encoder.
+        See https://pytorch.org/docs/stable/checkpoint.html
+        """
+        for mod in self.model.cross_layers:
+            mod.use_checkpoint = use_checkpoint
         
         
 
@@ -1553,6 +1561,23 @@ class LlamaBiCodeLM(LlamaPreTrainedModel, GenerationMixin):
             hidden_states=decoder_outputs.hidden_states,
             attentions=decoder_outputs.attentions,
         )
+
+    def loss_function(self, logits, labels, vocab_size, **kwargs):
+        # Shift so that tokens < n predict n
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        
+        # Flatten the tokens
+        loss_fct = nn.CrossEntropyLoss(reduction='none')
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+        
+        # 패딩 토큰(-100)을 제외하고 loss 계산
+        loss = loss_fct(shift_logits, shift_labels)
+        # 패딩 토큰이 아닌 위치만 평균 계산
+        loss = loss[shift_labels != -100].mean()
+        
+        return loss
 
 @add_start_docstrings(
     """
