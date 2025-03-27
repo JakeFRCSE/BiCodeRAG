@@ -33,7 +33,7 @@ huggingface-cli login
 cd YOUR_PATH_TO_BiCodeRAG
 ```
 3. Train
-Make sure you have more than 16GM of vRAM for meta-llama/llama-3.2-1B model.
+Make sure you have more than 16GB of vRAM for meta-llama/llama-3.2-1B model.
 
 This Example is for training and evaluating on NQ dataset.
 
