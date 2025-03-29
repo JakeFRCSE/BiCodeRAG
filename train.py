@@ -50,9 +50,10 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             step += 1
             (idx, labels, _, context_ids, context_mask, question_ids, question_mask, _, _) = batch
             
+            current_batch_size = question_ids.size(0)
+            context_ids = context_ids.view(current_batch_size, -1) 
+            context_mask = context_mask.view(current_batch_size, -1)
 
-            context_ids = context_ids.view(opt.per_gpu_batch_size, -1) 
-            context_mask = context_mask.view(opt.per_gpu_batch_size, -1)
             encoded_context = model.encode(
                 input_ids = context_ids.to(model.device),
                 attention_mask = context_mask.to(model.device)
@@ -139,9 +140,9 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
             (idx, _, _, context_ids, context_mask, input_ids, input_mask, question_ids, question_mask) = batch
-
-            context_ids = context_ids.view(opt.per_gpu_eval_batch_size, -1) 
-            context_mask = context_mask.view(opt.per_gpu_eval_batch_size, -1)
+            current_batch_size = question_ids.size(0)
+            context_ids = context_ids.view(current_batch_size, -1) 
+            context_mask = context_mask.view(current_batch_size, -1)
 
             logger.info(f"step: {i}\n")
 
