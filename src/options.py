@@ -88,7 +88,7 @@ class Options():
                         help='save model every <save_freq> steps during training')
         self.parser.add_argument('--eval_print_freq', type=int, default=1000,
                         help='print intermdiate results of evaluation every <eval_print_freq> steps')
-        self.parser.add_argument('--eval_steps', type=int, default=100,
+        self.parser.add_argument('--eval_steps', type=int, default=0,
                         help='evaluate model for <eval_steps> steps during training')
         self.parser.add_argument('--cross_attention_layer_only', action='store_true',
                                  help='train only the cross-attention layer')

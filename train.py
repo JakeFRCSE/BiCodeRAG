@@ -111,10 +111,13 @@ def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
     # 평가용 시드 설정
     torch.manual_seed(eval_seed)
     
-    # 평가할 스텝 수만큼만 데이터를 사용하도록 수정
-    eval_size = min(len(dataset), opt.eval_steps * opt.per_gpu_eval_batch_size)
-    eval_indices = torch.randperm(len(dataset))[:eval_size]
-    eval_subset = torch.utils.data.Subset(dataset, eval_indices)
+    
+    if opt.eval_steps > 0:
+        eval_size = min(len(dataset), opt.eval_steps * opt.per_gpu_eval_batch_size)
+        eval_indices = torch.randperm(len(dataset))[:eval_size]
+        eval_subset = torch.utils.data.Subset(dataset, eval_indices)
+    else:
+        eval_subset = dataset
     
     sampler = SequentialSampler(eval_subset)
     dataloader = DataLoader(
