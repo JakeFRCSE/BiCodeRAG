@@ -25,7 +25,8 @@ python train.py --train_data ./open_domain_data/NQ/train.json \
                 --per_gpu_batch_size 64 \
                 --n_context 5 \
                 --eval_freq 500 \
-                --name NQ_1B_experiment \                --checkpoint_dir NQ_1B_checkpoint \
+                --name NQ_1B_experiment \
+                --checkpoint_dir NQ_1B_checkpoint \
                 --warmup_steps 1000 \
                 --total_steps 10000 \
                 --per_gpu_eval_batch_size 64 \
