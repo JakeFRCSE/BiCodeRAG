@@ -22,15 +22,15 @@ This Example is for training and evaluating on NQ dataset.
 python train.py --train_data ./open_domain_data/NQ/train.json \
                 --eval_data ./open_domain_data/NQ/dev.json \
                 --model_size 1B \
-                --per_gpu_batch_size 2 \
-                --n_context 100 \
-                --eval_freq 5000 \
-                --warmup_steps 8000 \
-                --total_steps 320000 \
-                --per_gpu_eval_batch_size 1 \
-                --name my_experiment \
-                --checkpoint_dir checkpoint \
+                --per_gpu_batch_size 64 \
+                --n_context 5 \
+                --eval_freq 500 \
+                --name NQ_1B_experiment \                --checkpoint_dir NQ_1B_checkpoint \
+                --warmup_steps 1000 \
+                --total_steps 10000 \
+                --per_gpu_eval_batch_size 64 \
                 --cross_attention_layer_only \
+                --save_freq 1237
                 # If you have a model to further train, add the following line.
                 #--model_path YOUR_DIRECTORY_TO_MODEL \
 ```
@@ -39,7 +39,7 @@ python train.py --train_data ./open_domain_data/NQ/train.json \
 python test.py \
         --model_path --model_path YOUR_DIRECTORY_TO_MODEL \
         --eval_data ./open_domain_data/NQ/test.json\
-        --per_gpu_batch_size 1 \
+        --per_gpu_batch_size 2 \
         --n_context 100 \
         --name my_test \
         --checkpoint_dir checkpoint \
