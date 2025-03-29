@@ -105,6 +105,8 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                 src.util.save(model, optimizer, scheduler, step, best_dev_em,
                           opt, checkpoint_path, f"step-{step}")
             if step > opt.total_steps:
+                src.util.save(model, optimizer, scheduler, step, best_dev_em,
+                          opt, checkpoint_path, f"step-{step}")
                 break
 
 def evaluate(model, dataset, tokenizer, collator, opt, eval_seed):
