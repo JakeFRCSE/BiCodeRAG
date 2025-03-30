@@ -224,4 +224,6 @@ $RECYCLE.BIN/
 
 .DS_Store
 
+open_domain_data
+
 # End of https://www.toptal.com/developers/gitignore/api/python,cuda,linux,windows
