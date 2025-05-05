@@ -1,4 +1,4 @@
-# Current Branch is dev/llama!
+# Current Branch is feature/llama_refactor!
 To return to the main branch, 
 
 [Click Here For Main Branch!](https://github.com/JakeFRCSE/BiCodeRAG)
