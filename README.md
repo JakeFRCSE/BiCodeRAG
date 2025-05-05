@@ -1,7 +1,10 @@
 ## Research Documentation
-Please click the link to access the Notion page, which is used for organizing ideas.
+Please click the link to access the Notion page, which is used to record progress and organize ideas.
 
-[Click Here!](https://crystal-air-942.notion.site/CrossDecoder-Training-Additional-Cross-Attention-Layer-in-Decoder-Only-Models-19941c6bef1680208d9af3e4f577aa8d?pvs=4)
+[Click Here For Notion Page!](https://crystal-air-942.notion.site/CrossDecoder-Training-Additional-Cross-Attention-Layer-in-Decoder-Only-Models-19941c6bef1680208d9af3e4f577aa8d?pvs=4)
+
+Currently working on feature/llama_refactor branch.
+[Click Here For Feature Branch!](https://github.com/JakeFRCSE/BiCodeRAG/tree/feature/llama_refactor)
 
 ## How to set the environment
 1. Create conda virtual environment
@@ -33,9 +36,7 @@ huggingface-cli login
 cd YOUR_PATH_TO_BiCodeRAG
 ```
 3. Train
-Make sure you have more than 16GB of vRAM for meta-llama/llama-3.2-1B model.
-
-This Example is for training and evaluating on NQ dataset.
+Make sure you have more than 32GB of vRAM for the following instructions.
 
 ```bash
 python train.py --train_data ./open_domain_data/NQ/train.json \
@@ -63,6 +64,3 @@ python test.py \
         --name my_test \
         --checkpoint_dir checkpoint \
 ```
-
-
-All of the files are based on [facebookresearch/FiD](https://github.com/facebookresearch/FiD/tree/main) and [transformers library](https://github.com/huggingface/transformers) 
