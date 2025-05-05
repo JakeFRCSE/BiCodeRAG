@@ -14,9 +14,7 @@ huggingface-cli login
 cd YOUR_PATH_TO_BiCodeRAG
 ```
 3. Train
-Make sure you have more than 16GM of vRAM for meta-llama/llama-3.2-1B model.
-
-This Example is for training and evaluating on NQ dataset.
+Make sure you have more than 32GM of vRAM for meta-llama/llama-3.2-1B model.
 
 ```bash
 python train.py --train_data ./open_domain_data/NQ/train.json \
@@ -45,6 +43,3 @@ python test.py \
         --name my_test \
         --checkpoint_dir checkpoint \
 ```
-
-
-All of the files introduced at current branch is copied from [facebookresearch/FiD](https://github.com/facebookresearch/FiD/tree/main) 
