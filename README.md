@@ -1,7 +1,13 @@
 # Current Branch is dev/llama!
-To return to the main branch, [Click Here For Main Branch!](https://github.com/JakeFRCSE/BiCodeRAG)
+To return to the main branch, 
 
-To view weekly research progress report, [Click Here For Weekly Research Progress Report!](https://crystal-air-942.notion.site/1a041c6bef1680e68685f7890655201b)
+[Click Here For Main Branch!](https://github.com/JakeFRCSE/BiCodeRAG)
+
+To view weekly research progress report, 
+
+[Click Here For Weekly Research Progress Report(Kor)!](https://crystal-air-942.notion.site/1a041c6bef1680e68685f7890655201b)
+
+[Click Here For Weekly Research Progress Report(Eng)!](https://crystal-air-942.notion.site/Research-History-1cc41c6bef1680fab565e4d67da8a5a5)
 
 # How to use
 1. Login into huggingface to get access to the model (this process is required only for the initialization of the model)
