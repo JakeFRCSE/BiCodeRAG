@@ -4,6 +4,7 @@ Please click the link to access the Notion page, which is used to record progres
 [Click Here For Notion Page!](https://crystal-air-942.notion.site/CrossDecoder-Training-Additional-Cross-Attention-Layer-in-Decoder-Only-Models-19941c6bef1680208d9af3e4f577aa8d?pvs=4)
 
 Currently working on feature/llama_refactor branch.
+
 [Click Here For Feature Branch!](https://github.com/JakeFRCSE/BiCodeRAG/tree/feature/llama_refactor)
 
 ## How to set the environment
