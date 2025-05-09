@@ -1,13 +1,43 @@
 import transformers
 from torch import nn
 from typing import Unpack, Callable
-from transformers.utils import FlashAttentionKwargs
+from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from transformers.utils import logging
-from transformers.utils import eager_attention_forward
-from transformers.utils import ALL_ATTENTION_FUNCTIONS
-from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+from transformers.models.llama.modeling_llama import rotate_half, eager_attention_forward
 
 logger = logging.get_logger(__name__)
+
+def apply_rotary_pos_emb(q, k, cos, sin, kv_cos=None, kv_sin=None, position_ids=None, kv_position_ids=None, unsqueeze_dim=1):
+    """Applies Rotary Position Embedding to the query and key tensors.
+
+    Args:
+        q (`torch.Tensor`): The query tensor.
+        k (`torch.Tensor`): The key tensor.
+        cos (`torch.Tensor`): The cosine part of the rotary embedding.
+        sin (`torch.Tensor`): The sine part of the rotary embedding.
+        position_ids (`torch.Tensor`, *optional*):
+            Deprecated and unused.
+        unsqueeze_dim (`int`, *optional*, defaults to 1):
+            The 'unsqueeze_dim' argument specifies the dimension along which to unsqueeze cos[position_ids] and
+            sin[position_ids] so that they can be properly broadcasted to the dimensions of q and k. For example, note
+            that cos[position_ids] and sin[position_ids] have the shape [batch_size, seq_len, head_dim]. Then, if q and
+            k have the shape [batch_size, heads, seq_len, head_dim], then setting unsqueeze_dim=1 makes
+            cos[position_ids] and sin[position_ids] broadcastable to the shapes of q and k. Similarly, if q and k have
+            the shape [batch_size, seq_len, heads, head_dim], then set unsqueeze_dim=2.
+    Returns:
+        `tuple(torch.Tensor)` comprising of the query and key tensors rotated using the Rotary Position Embedding.
+    """
+    cos = cos.unsqueeze(unsqueeze_dim)
+    sin = sin.unsqueeze(unsqueeze_dim)
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    if kv_cos is not None and kv_sin is not None:
+        kv_cos = kv_cos.unsqueeze(unsqueeze_dim)
+        kv_sin = kv_sin.unsqueeze(unsqueeze_dim)
+        k_embed = (k * kv_cos) + (rotate_half(k) * kv_sin)
+    else:
+        k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
 
 
 class T5LikeLlamaAttention(nn.Module):
@@ -41,6 +71,7 @@ class T5LikeLlamaAttention(nn.Module):
                 position_embeddings,
                 attention_mask=None,
                 key_value_states=None,
+                kv_position_embeddings=None,
                 past_key_value=None,
                 use_cache=False,
                 output_attentions=False,
@@ -66,8 +97,8 @@ class T5LikeLlamaAttention(nn.Module):
         else:
             key_states = self.k_proj(current_states)
             value_states = self.v_proj(current_states)
-            key_states = key_states.view(batch_size, seq_length, -1, self.n_heads).transpose(1, 2)
-            value_states = value_states.view(batch_size, seq_length, -1, self.n_heads).transpose(1, 2)
+            key_states = key_states.view(batch_size, -1, self.n_heads, self.head_dim).transpose(1, 2)
+            value_states = value_states.view(batch_size, -1, self.n_heads, self.head_dim).transpose(1, 2)
 
             if past_key_value is not None:
                 # save all key/value_states to cache to be re-used for fast auto-regressive generation
@@ -80,10 +111,14 @@ class T5LikeLlamaAttention(nn.Module):
                     past_key_value.is_updated[self.layer_idx] = True
         
         query_states = self.q_proj(hidden_states)
-        query_states = query_states.view(batch_size, seq_length, -1, self.n_heads).transpose(1, 2)
+        query_states = query_states.view(batch_size, seq_length, -1, self.head_dim).transpose(1, 2)
 
         cos, sin = position_embeddings
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        if kv_position_embeddings is not None:
+            kv_cos, kv_sin = kv_position_embeddings
+            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, kv_cos, kv_sin)
+        else:
+            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
         attention_interface: Callable = eager_attention_forward
 
